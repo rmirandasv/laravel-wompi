@@ -1,0 +1,24 @@
+{
+  "name": "@rmirandasv/laravel-wompi",
+  "version": "0.0.0",
+  "description": "A Laravel package to integrate with the Wompi payment gateway for El Salvador.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rmirandasv/laravel-wompi.git"
+  },
+  "private": false,
+  "scripts": {
+    "prepare": "husky",
+    "test": "composer test"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^19.5.0",
+    "@commitlint/config-conventional": "^19.5.0",
+    "@semantic-release/changelog": "^6.0.3",
+    "@semantic-release/git": "^10.0.1",
+    "@semantic-release/github": "^10.3.5",
+    "husky": "^9.1.6",
+    "semantic-release": "^24.1.2"
+  }
+}
+

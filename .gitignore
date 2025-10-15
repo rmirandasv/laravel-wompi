@@ -1,0 +1,46 @@
+# Composer
+/vendor/
+composer.lock
+
+# Laravel
+.env
+.env.backup
+.env.production
+
+# PHPUnit / Testing
+.phpunit.result.cache
+phpunit.xml
+/coverage/
+.phpunit.cache
+
+# IDE
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+.php_cs
+.php_cs.cache
+.php-cs-fixer.cache
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Build
+/build/
+/dist/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Node (si usas assets frontend)
+node_modules/
+package-lock.json
+yarn.lock
+
