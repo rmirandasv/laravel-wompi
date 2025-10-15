@@ -38,8 +38,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Node (si usas assets frontend)
+# Node
 node_modules/
-package-lock.json
 yarn.lock
 
