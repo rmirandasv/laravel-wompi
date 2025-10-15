@@ -1,8 +1,8 @@
 # Laravel Wompi
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![PHP Version](https://img.shields.io/badge/php-%5E8.1-8892BF.svg)](https://php.net)
-[![Laravel Version](https://img.shields.io/badge/laravel-9%2B%7C10%2B%7C11%2B-FF2D20.svg)](https://laravel.com)
+[![PHP Version](https://img.shields.io/badge/php-%5E8.2-8892BF.svg)](https://php.net)
+[![Laravel Version](https://img.shields.io/badge/laravel-10%2B%7C11%2B%7C12%2B-FF2D20.svg)](https://laravel.com)
 
 Un paquete de Laravel completo y robusto para integrar la pasarela de pago [Wompi](https://wompi.sv) de El Salvador en tus aplicaciones.
 
