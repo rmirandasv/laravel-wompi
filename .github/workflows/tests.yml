@@ -30,7 +30,7 @@ jobs:
           coverage: xdebug
       
       - name: Install Composer dependencies
-        run: composer update --prefer-dist --no-interaction --no-progress
+        run: composer update --prefer-dist --no-interaction --no-progress --prefer-stable
       
       - name: Run tests
         run: composer test
