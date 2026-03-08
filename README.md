@@ -167,11 +167,56 @@ $soportaCuotas = $aplicativoData['soportaPagoEnCuotas'];
 $cuotasDisponibles = $aplicativoData['cuotasDisponibles'];
 ```
 
-## 🔔 Webhooks
+## 🔔 Webhooks y Eventos
 
-Los webhooks son la forma principal de recibir notificaciones de transacciones exitosas.
+Los webhooks son la forma principal de recibir notificaciones de transacciones exitosas. El paquete ofrece múltiples formas de manejar estas notificaciones: a través de **Eventos de Laravel** o usando tu propio controlador.
 
-### 1. Crear tu Controlador de Webhooks
+### 1. Usar Eventos de Laravel (Recomendado)
+
+El paquete despacha eventos automáticamente cuando valida un webhook exitosamente. Puedes escucharlos en tu aplicación:
+
+- `Rmirandasv\Wompi\Events\WompiWebhookReceived`: Se dispara siempre que se recibe y valida una notificación de Wompi, útil para guardar logs en crudo.
+- `Rmirandasv\Wompi\Events\WompiPaymentProcessed`: Se dispara junto al anterior, pero incluye la propiedad `$isSuccessful` (booleano) facilitando saber si el pago fue aprobado o no.
+
+**Ejemplo de Listener:**
+
+```php
+namespace App\Listeners;
+
+use Rmirandasv\Wompi\Events\WompiPaymentProcessed;
+
+class ProcessWompiPayment
+{
+    public function handle(WompiPaymentProcessed $event): void
+    {
+        $payload = $event->payload;
+        $orderId = $payload['enlacePago']['identificadorEnlaceComercio'] ?? null;
+        
+        if ($event->isSuccessful) {
+            // Lógica para marcar orden como pagada...
+            \Log::info("Pago exitoso procesado para la orden: {$orderId}");
+        } else {
+            // Lógica para marcar orden como fallida...
+        }
+    }
+}
+```
+
+### 2. Middleware para validación
+
+Si decides crear tus propios endpoints y controladores para recibir los webhooks y no quieres llamar al método de validación manualmente, puedes usar el middleware incluido. 
+
+Primero aségurate de que tu ruta esté excluida del middleware CSRF y usa el alias `wompi.webhook`:
+
+```php
+Route::post('/webhooks/wompi', [WompiWebhookController::class, 'handle'])
+    ->withoutMiddleware([\App\Http\Middleware\VerifyCsrfToken::class])
+    ->middleware('wompi.webhook'); // <-- Validación automática de firma HMAC
+```
+
+### 3. Crear tu Controlador Manual
+
+Si prefieres manejar la validación manualmente dentro de tu controlador, puedes hacerlo así:
 
 ```php
 namespace App\Http\Controllers;
@@ -186,10 +231,10 @@ class WompiWebhookController extends Controller
     public function handle(Request $request): JsonResponse
     {
         try {
-            // Validar y obtener datos del webhook
+            // Validar y obtener datos del webhook (esto también dispara los eventos de arriba)
             $webhookData = Wompi::validateWebhookRequest($request);
             
-            // Verificar si es un pago exitoso
+            // Verificar si es un pago exitoso manualmente
             if (Wompi::isSuccessfulPayment($webhookData)) {
                 $this->processSuccessfulPayment($webhookData);
             }
