@@ -322,19 +322,22 @@ $response = Wompi::executeTestTransaction([
 
 ## 🔧 Inyección de Dependencias
 
-También puedes usar inyección de dependencias en lugar de la Facade:
+También puedes usar inyección de dependencias en lugar de la Facade. El paquete expone un contrato (`Interface`) para facilitar el testing y desacoplar tu código:
 
 ```php
-use Rmirandasv\Wompi\WompiClient;
+use Rmirandasv\Wompi\Contracts\WompiClientInterface;
+use Rmirandasv\Wompi\DTOs\Requests\PaymentLinkRequestDTO;
 
 class PaymentService
 {
-    public function __construct(private WompiClient $wompi)
+    public function __construct(private WompiClientInterface $wompi)
     {
     }
     
-    public function createPayment(array $data): array
+    public function createPayment(array $data)
     {
+        // Puedes pasar un array tradicional o usar los nuevos DTOs para mayor seguridad:
+        // $dto = PaymentLinkRequestDTO::fromArray($data);
         return $this->wompi->createPaymentLink($data);
     }
 }
@@ -363,9 +366,9 @@ try {
 
 | Método | Descripción |
 |--------|-------------|
-| `createPaymentLink(array $data)` | Crea un enlace de pago |
-| `createTransaction3DS(array $data)` | Crea una transacción con 3DS |
-| `tokenizeCard(array $data)` | Tokeniza una tarjeta |
+| `createPaymentLink(array\|PaymentLinkRequestDTO $data)` | Crea un enlace de pago |
+| `createTransaction3DS(array\|Transaction3DSRequestDTO $data)` | Crea una transacción con 3DS |
+| `tokenizeCard(array\|TokenizeCardRequestDTO $data)` | Tokeniza una tarjeta |
 | `getTokenizedCard(string $tokenId)` | Obtiene información de un token |
 | `deleteTokenizedCard(string $tokenId)` | Elimina un token |
 | `createRecurringCharge(array $data)` | Crea un cargo recurrente |
