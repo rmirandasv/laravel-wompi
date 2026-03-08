@@ -167,11 +167,56 @@ $soportaCuotas = $aplicativoData['soportaPagoEnCuotas'];
 $cuotasDisponibles = $aplicativoData['cuotasDisponibles'];
 ```
 
-## 🔔 Webhooks
+## 🔔 Webhooks y Eventos
 
-Los webhooks son la forma principal de recibir notificaciones de transacciones exitosas.
+Los webhooks son la forma principal de recibir notificaciones de transacciones exitosas. El paquete ofrece múltiples formas de manejar estas notificaciones: a través de **Eventos de Laravel** o usando tu propio controlador.
 
-### 1. Crear tu Controlador de Webhooks
+### 1. Usar Eventos de Laravel (Recomendado)
+
+El paquete despacha eventos automáticamente cuando valida un webhook exitosamente. Puedes escucharlos en tu aplicación:
+
+- `Rmirandasv\Wompi\Events\WompiWebhookReceived`: Se dispara siempre que se recibe y valida una notificación de Wompi, útil para guardar logs en crudo.
+- `Rmirandasv\Wompi\Events\WompiPaymentProcessed`: Se dispara junto al anterior, pero incluye la propiedad `$isSuccessful` (booleano) facilitando saber si el pago fue aprobado o no.
+
+**Ejemplo de Listener:**
+
+```php
+namespace App\Listeners;
+
+use Rmirandasv\Wompi\Events\WompiPaymentProcessed;
+
+class ProcessWompiPayment
+{
+    public function handle(WompiPaymentProcessed $event): void
+    {
+        $payload = $event->payload;
+        $orderId = $payload['enlacePago']['identificadorEnlaceComercio'] ?? null;
+        
+        if ($event->isSuccessful) {
+            // Lógica para marcar orden como pagada...
+            \Log::info("Pago exitoso procesado para la orden: {$orderId}");
+        } else {
+            // Lógica para marcar orden como fallida...
+        }
+    }
+}
+```
+
+### 2. Middleware para validación
+
+Si decides crear tus propios endpoints y controladores para recibir los webhooks y no quieres llamar al método de validación manualmente, puedes usar el middleware incluido. 
+
+Primero aségurate de que tu ruta esté excluida del middleware CSRF y usa el alias `wompi.webhook`:
+
+```php
+Route::post('/webhooks/wompi', [WompiWebhookController::class, 'handle'])
+    ->withoutMiddleware([\App\Http\Middleware\VerifyCsrfToken::class])
+    ->middleware('wompi.webhook'); // <-- Validación automática de firma HMAC
+```
+
+### 3. Crear tu Controlador Manual
+
+Si prefieres manejar la validación manualmente dentro de tu controlador, puedes hacerlo así:
 
 ```php
 namespace App\Http\Controllers;
@@ -186,10 +231,10 @@ class WompiWebhookController extends Controller
     public function handle(Request $request): JsonResponse
     {
         try {
-            // Validar y obtener datos del webhook
+            // Validar y obtener datos del webhook (esto también dispara los eventos de arriba)
             $webhookData = Wompi::validateWebhookRequest($request);
             
-            // Verificar si es un pago exitoso
+            // Verificar si es un pago exitoso manualmente
             if (Wompi::isSuccessfulPayment($webhookData)) {
                 $this->processSuccessfulPayment($webhookData);
             }
@@ -322,19 +367,22 @@ $response = Wompi::executeTestTransaction([
 
 ## 🔧 Inyección de Dependencias
 
-También puedes usar inyección de dependencias en lugar de la Facade:
+También puedes usar inyección de dependencias en lugar de la Facade. El paquete expone un contrato (`Interface`) para facilitar el testing y desacoplar tu código:
 
 ```php
-use Rmirandasv\Wompi\WompiClient;
+use Rmirandasv\Wompi\Contracts\WompiClientInterface;
+use Rmirandasv\Wompi\DTOs\Requests\PaymentLinkRequestDTO;
 
 class PaymentService
 {
-    public function __construct(private WompiClient $wompi)
+    public function __construct(private WompiClientInterface $wompi)
     {
     }
     
-    public function createPayment(array $data): array
+    public function createPayment(array $data)
     {
+        // Puedes pasar un array tradicional o usar los nuevos DTOs para mayor seguridad:
+        // $dto = PaymentLinkRequestDTO::fromArray($data);
         return $this->wompi->createPaymentLink($data);
     }
 }
@@ -342,20 +390,28 @@ class PaymentService
 
 ## 🛡️ Manejo de Excepciones
 
-El paquete lanza dos tipos de excepciones:
+El paquete lanza excepciones específicas para diferentes escenarios:
 
 ```php
 use Rmirandasv\Wompi\Exceptions\ConfigurationException;
 use Rmirandasv\Wompi\Exceptions\PaymentGatewayException;
+use Rmirandasv\Wompi\Exceptions\WompiValidationException;
 
 try {
     $response = Wompi::createPaymentLink($data);
+} catch (WompiValidationException $e) {
+    // Los datos proporcionados en los DTOs no son válidos
+    \Log::error('Validation error: ' . $e->getMessage(), $e->getErrors());
 } catch (ConfigurationException $e) {
     // Credenciales no configuradas correctamente
     \Log::error('Wompi configuration error: ' . $e->getMessage());
 } catch (PaymentGatewayException $e) {
-    // Error comunicándose con la API de Wompi
+    // Error comunicándose con la API de Wompi (e.g. 400 Bad Request, 401 Unauthorized)
     \Log::error('Wompi API error: ' . $e->getMessage());
+    
+    // Puedes acceder a los detalles del error devueltos por Wompi
+    $statusCode = $e->getStatusCode();
+    $wompiErrorBody = $e->getResponseBody();
 }
 ```
 
@@ -363,9 +419,9 @@ try {
 
 | Método | Descripción |
 |--------|-------------|
-| `createPaymentLink(array $data)` | Crea un enlace de pago |
-| `createTransaction3DS(array $data)` | Crea una transacción con 3DS |
-| `tokenizeCard(array $data)` | Tokeniza una tarjeta |
+| `createPaymentLink(array\|PaymentLinkRequestDTO $data)` | Crea un enlace de pago |
+| `createTransaction3DS(array\|Transaction3DSRequestDTO $data)` | Crea una transacción con 3DS |
+| `tokenizeCard(array\|TokenizeCardRequestDTO $data)` | Tokeniza una tarjeta |
 | `getTokenizedCard(string $tokenId)` | Obtiene información de un token |
 | `deleteTokenizedCard(string $tokenId)` | Elimina un token |
 | `createRecurringCharge(array $data)` | Crea un cargo recurrente |

@@ -196,19 +196,30 @@ describe('WompiClient API Calls', function () {
             ->and($result['nombre'])->toBe('Test App');
     });
 
-    it('throws PaymentGatewayException when API call fails', function () {
+    it('throws PaymentGatewayException with details when API call fails', function () {
+        $errorBody = [
+            'error' => 'invalid_amount',
+            'mensaje' => 'El monto debe ser mayor a cero'
+        ];
+
         Http::fake([
             'https://id.wompi.sv/test' => Http::response([
                 'access_token' => 'test_token',
                 'expires_in' => 3600,
             ], 200),
-            'https://api.wompi.sv/v1/test/EnlacePago' => Http::response([
-                'error' => 'invalid_amount',
-            ], 400),
+            'https://api.wompi.sv/v1/test/EnlacePago' => Http::response($errorBody, 400),
         ]);
 
         $client = app(WompiClient::class);
-        $client->createPaymentLink(['monto' => -100]);
-    })->throws(PaymentGatewayException::class);
+        
+        try {
+            $client->createPaymentLink(['monto' => -100]);
+            $this->fail('Exception was not thrown');
+        } catch (PaymentGatewayException $e) {
+            expect($e->getMessage())->toContain('Reason: El monto debe ser mayor a cero')
+                ->and($e->getStatusCode())->toBe(400)
+                ->and($e->getResponseBody())->toBe($errorBody);
+        }
+    });
 });
 

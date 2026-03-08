@@ -16,6 +16,15 @@ abstract class TestCase extends BaseTestCase
 
     protected function getEnvironmentSetUp($app)
     {
+        // Setup default database and cache config for testing
+        $app['config']->set('database.default', 'sqlite');
+        $app['config']->set('database.connections.sqlite', [
+            'driver'   => 'sqlite',
+            'database' => ':memory:',
+            'prefix'   => '',
+        ]);
+        $app['config']->set('cache.default', 'array');
+
         // Setup default configuration
         $app['config']->set('wompi.auth_url', 'https://id.wompi.sv/test');
         $app['config']->set('wompi.api_url', 'https://api.wompi.sv/v1/test');

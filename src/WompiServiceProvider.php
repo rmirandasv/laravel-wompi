@@ -12,7 +12,7 @@ class WompiServiceProvider extends ServiceProvider
             __DIR__.'/../config/wompi.php', 'wompi'
         );
 
-        $this->app->singleton(WompiClient::class, function ($app) {
+        $this->app->singleton(\Rmirandasv\Wompi\Contracts\WompiClientInterface::class, function ($app) {
             return new WompiClient(
                 $app['config']['wompi.auth_url'],
                 $app['config']['wompi.api_url'],
@@ -21,15 +21,18 @@ class WompiServiceProvider extends ServiceProvider
             );
         });
 
-        $this->app->alias(WompiClient::class, 'wompi');
+        $this->app->alias(\Rmirandasv\Wompi\Contracts\WompiClientInterface::class, WompiClient::class);
+        $this->app->alias(\Rmirandasv\Wompi\Contracts\WompiClientInterface::class, 'wompi');
     }
 
-    public function boot()
+    public function boot(\Illuminate\Routing\Router $router)
     {
         if ($this->app->runningInConsole()) {
             $this->publishes([
                 __DIR__.'/../config/wompi.php' => config_path('wompi.php'),
             ], 'wompi-config');
         }
+
+        $router->aliasMiddleware('wompi.webhook', \Rmirandasv\Wompi\Http\Middleware\VerifyWompiWebhookSignature::class);
     }
 }

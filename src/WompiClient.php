@@ -7,10 +7,19 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Rmirandasv\Wompi\Contracts\WompiClientInterface;
+use Rmirandasv\Wompi\DTOs\Requests\PaymentLinkRequestDTO;
+use Rmirandasv\Wompi\DTOs\Requests\TokenizeCardRequestDTO;
+use Rmirandasv\Wompi\DTOs\Requests\Transaction3DSRequestDTO;
+use Rmirandasv\Wompi\DTOs\Responses\PaymentLinkResponseDTO;
+use Rmirandasv\Wompi\DTOs\Responses\TokenizedCardResponseDTO;
+use Rmirandasv\Wompi\DTOs\Responses\TransactionResponseDTO;
+use Rmirandasv\Wompi\Events\WompiPaymentProcessed;
+use Rmirandasv\Wompi\Events\WompiWebhookReceived;
 use Rmirandasv\Wompi\Exceptions\ConfigurationException;
 use Rmirandasv\Wompi\Exceptions\PaymentGatewayException;
 
-class WompiClient
+class WompiClient implements WompiClientInterface
 {
     public function __construct(
         private ?string $authUrl,
@@ -73,20 +82,61 @@ class WompiClient
         try {
             $accessToken = $this->getAccessToken();
             $url = sprintf('%s/%s', rtrim($this->apiUrl, '/'), ltrim($endpoint, '/'));
-		Log::info($url);
+            
+            $startTime = microtime(true);
+            Log::info("Wompi API Request: {$method} {$endpoint}", [
+                'url' => $url,
+                // Mask sensitive card numbers if present before logging
+                'payload' => $this->maskSensitiveData($data),
+            ]);
 
             $response = Http::withToken($accessToken)
                 ->$method($url, $data)
                 ->throw();
 
+            $duration = round((microtime(true) - $startTime) * 1000, 2);
+            Log::info("Wompi API Response: {$method} {$endpoint}", [
+                'status' => $response->status(),
+                'duration_ms' => $duration,
+            ]);
+
             return $response->json() ?? [];
         } catch (RequestException $e) {
+            $response = $e->response;
+            $statusCode = $response->status();
+            $errorBody = $response->json();
+            
             Log::error("Wompi API request failed: {$method} {$endpoint}", [
-                'error' => $e->getMessage(),
-                'data' => $data,
+                'status' => $statusCode,
+                'error_body' => $errorBody,
+                'payload' => $this->maskSensitiveData($data),
+                'headers' => $response->headers(),
             ]);
-            throw new PaymentGatewayException("API request failed: {$endpoint}", 0, $e);
+            
+            $message = "API request failed: {$endpoint}. ";
+            if (isset($errorBody['mensaje'])) {
+                $message .= "Reason: " . $errorBody['mensaje'];
+            } elseif (isset($errorBody['message'])) {
+                $message .= "Reason: " . $errorBody['message'];
+            }
+
+            throw new PaymentGatewayException($message, 0, $e, $errorBody, $statusCode);
         }
+    }
+
+    /**
+     * Masks sensitive data like credit card numbers for logging purposes.
+     */
+    private function maskSensitiveData(array $data): array
+    {
+        $masked = $data;
+        if (isset($masked['numeroTarjeta'])) {
+            $masked['numeroTarjeta'] = substr($masked['numeroTarjeta'], 0, 4) . '********' . substr($masked['numeroTarjeta'], -4);
+        }
+        if (isset($masked['cvv'])) {
+            $masked['cvv'] = '***';
+        }
+        return $masked;
     }
 
     /**
@@ -94,9 +144,12 @@ class WompiClient
      * 
      * @see https://docs.wompi.sv/metodos-api/enlace-de-pago
      */
-    public function createPaymentLink(array $data): array
+    public function createPaymentLink(array|PaymentLinkRequestDTO $data): PaymentLinkResponseDTO|array
     {
-        return $this->makeAuthenticatedRequest('post', 'EnlacePago', $data);
+        $payload = $data instanceof PaymentLinkRequestDTO ? $data->toArray() : $data;
+        $response = $this->makeAuthenticatedRequest('post', 'EnlacePago', $payload);
+        
+        return new PaymentLinkResponseDTO($response);
     }
 
     /**
@@ -104,9 +157,12 @@ class WompiClient
      * 
      * @see https://docs.wompi.sv/metodos-api/crear-transaccion-compra-3ds
      */
-    public function createTransaction3DS(array $data): array
+    public function createTransaction3DS(array|Transaction3DSRequestDTO $data): TransactionResponseDTO|array
     {
-        return $this->makeAuthenticatedRequest('post', 'Transaccion', $data);
+        $payload = $data instanceof Transaction3DSRequestDTO ? $data->toArray() : $data;
+        $response = $this->makeAuthenticatedRequest('post', 'Transaccion', $payload);
+        
+        return new TransactionResponseDTO($response);
     }
 
     /**
@@ -124,9 +180,12 @@ class WompiClient
      * 
      * @see https://docs.wompi.sv/metodos-api/tokenizacion
      */
-    public function tokenizeCard(array $data): array
+    public function tokenizeCard(array|TokenizeCardRequestDTO $data): TokenizedCardResponseDTO|array
     {
-        return $this->makeAuthenticatedRequest('post', 'Tokenizacion', $data);
+        $payload = $data instanceof TokenizeCardRequestDTO ? $data->toArray() : $data;
+        $response = $this->makeAuthenticatedRequest('post', 'Tokenizacion', $payload);
+        
+        return new TokenizedCardResponseDTO($response);
     }
 
     /**
@@ -206,6 +265,13 @@ class WompiClient
         if (json_last_error() !== JSON_ERROR_NONE) {
             throw new PaymentGatewayException('Webhook request invalid: json is invalid');
         }
+
+        // Dispatch general webhook received event
+        event(new WompiWebhookReceived($webhookData));
+        
+        // Dispatch specific payment processed event with success boolean
+        $isSuccessful = $this->isSuccessfulPayment($webhookData);
+        event(new WompiPaymentProcessed($webhookData, $isSuccessful));
 
         return $webhookData;
     }
