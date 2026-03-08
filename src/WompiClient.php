@@ -14,6 +14,8 @@ use Rmirandasv\Wompi\DTOs\Requests\Transaction3DSRequestDTO;
 use Rmirandasv\Wompi\DTOs\Responses\PaymentLinkResponseDTO;
 use Rmirandasv\Wompi\DTOs\Responses\TokenizedCardResponseDTO;
 use Rmirandasv\Wompi\DTOs\Responses\TransactionResponseDTO;
+use Rmirandasv\Wompi\Events\WompiPaymentProcessed;
+use Rmirandasv\Wompi\Events\WompiWebhookReceived;
 use Rmirandasv\Wompi\Exceptions\ConfigurationException;
 use Rmirandasv\Wompi\Exceptions\PaymentGatewayException;
 
@@ -263,6 +265,13 @@ class WompiClient implements WompiClientInterface
         if (json_last_error() !== JSON_ERROR_NONE) {
             throw new PaymentGatewayException('Webhook request invalid: json is invalid');
         }
+
+        // Dispatch general webhook received event
+        event(new WompiWebhookReceived($webhookData));
+        
+        // Dispatch specific payment processed event with success boolean
+        $isSuccessful = $this->isSuccessfulPayment($webhookData);
+        event(new WompiPaymentProcessed($webhookData, $isSuccessful));
 
         return $webhookData;
     }
