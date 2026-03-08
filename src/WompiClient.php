@@ -7,10 +7,17 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Rmirandasv\Wompi\Contracts\WompiClientInterface;
+use Rmirandasv\Wompi\DTOs\Requests\PaymentLinkRequestDTO;
+use Rmirandasv\Wompi\DTOs\Requests\TokenizeCardRequestDTO;
+use Rmirandasv\Wompi\DTOs\Requests\Transaction3DSRequestDTO;
+use Rmirandasv\Wompi\DTOs\Responses\PaymentLinkResponseDTO;
+use Rmirandasv\Wompi\DTOs\Responses\TokenizedCardResponseDTO;
+use Rmirandasv\Wompi\DTOs\Responses\TransactionResponseDTO;
 use Rmirandasv\Wompi\Exceptions\ConfigurationException;
 use Rmirandasv\Wompi\Exceptions\PaymentGatewayException;
 
-class WompiClient
+class WompiClient implements WompiClientInterface
 {
     public function __construct(
         private ?string $authUrl,
@@ -73,7 +80,7 @@ class WompiClient
         try {
             $accessToken = $this->getAccessToken();
             $url = sprintf('%s/%s', rtrim($this->apiUrl, '/'), ltrim($endpoint, '/'));
-		Log::info($url);
+            Log::info($url);
 
             $response = Http::withToken($accessToken)
                 ->$method($url, $data)
@@ -94,9 +101,12 @@ class WompiClient
      * 
      * @see https://docs.wompi.sv/metodos-api/enlace-de-pago
      */
-    public function createPaymentLink(array $data): array
+    public function createPaymentLink(array|PaymentLinkRequestDTO $data): PaymentLinkResponseDTO|array
     {
-        return $this->makeAuthenticatedRequest('post', 'EnlacePago', $data);
+        $payload = $data instanceof PaymentLinkRequestDTO ? $data->toArray() : $data;
+        $response = $this->makeAuthenticatedRequest('post', 'EnlacePago', $payload);
+        
+        return new PaymentLinkResponseDTO($response);
     }
 
     /**
@@ -104,9 +114,12 @@ class WompiClient
      * 
      * @see https://docs.wompi.sv/metodos-api/crear-transaccion-compra-3ds
      */
-    public function createTransaction3DS(array $data): array
+    public function createTransaction3DS(array|Transaction3DSRequestDTO $data): TransactionResponseDTO|array
     {
-        return $this->makeAuthenticatedRequest('post', 'Transaccion', $data);
+        $payload = $data instanceof Transaction3DSRequestDTO ? $data->toArray() : $data;
+        $response = $this->makeAuthenticatedRequest('post', 'Transaccion', $payload);
+        
+        return new TransactionResponseDTO($response);
     }
 
     /**
@@ -124,9 +137,12 @@ class WompiClient
      * 
      * @see https://docs.wompi.sv/metodos-api/tokenizacion
      */
-    public function tokenizeCard(array $data): array
+    public function tokenizeCard(array|TokenizeCardRequestDTO $data): TokenizedCardResponseDTO|array
     {
-        return $this->makeAuthenticatedRequest('post', 'Tokenizacion', $data);
+        $payload = $data instanceof TokenizeCardRequestDTO ? $data->toArray() : $data;
+        $response = $this->makeAuthenticatedRequest('post', 'Tokenizacion', $payload);
+        
+        return new TokenizedCardResponseDTO($response);
     }
 
     /**
