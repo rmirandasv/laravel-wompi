@@ -2,9 +2,10 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![PHP Version](https://img.shields.io/badge/php-%5E8.2-8892BF.svg)](https://php.net)
+[![PHP 8.4](https://img.shields.io/badge/php-8.4-blue.svg)](https://php.net)
 [![Laravel Version](https://img.shields.io/badge/laravel-10%2B%7C11%2B%7C12%2B-FF2D20.svg)](https://laravel.com)
 
-Un paquete de Laravel completo y robusto para integrar la pasarela de pago [Wompi](https://wompi.sv) de El Salvador en tus aplicaciones.
+Un paquete de Laravel completo y robusto para integrar la pasarela de pago [Wompi](https://wompi.sv) de El Salvador en tus aplicaciones. Soporte oficial para PHP 8.2, 8.3, 8.4 y 8.5.
 
 ## 📋 Características
 

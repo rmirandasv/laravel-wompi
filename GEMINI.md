@@ -5,8 +5,7 @@
 A complete and robust Laravel package for integrating the **Wompi** payment gateway (specifically for El Salvador) into Laravel applications.
 
 ### Main Technologies
-
-- **PHP**: ^8.2
+- **PHP**: ^8.2 (Supports 8.2, 8.3, 8.4, 8.5)
 - **Laravel**: 10.x, 11.x, 12.x
 - **Testing**: [Pest PHP](https://pestphp.com)
 - **HTTP Client**: Laravel's `Http` facade (Guzzle wrapper)
