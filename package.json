@@ -1,6 +1,6 @@
 {
   "name": "@rmirandasv/laravel-wompi",
-  "version": "0.0.0",
+  "version": "0.2.0",
   "description": "A Laravel package to integrate with the Wompi payment gateway for El Salvador.",
   "repository": {
     "type": "git",
