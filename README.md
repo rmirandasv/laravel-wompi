@@ -345,20 +345,28 @@ class PaymentService
 
 ## 🛡️ Manejo de Excepciones
 
-El paquete lanza dos tipos de excepciones:
+El paquete lanza excepciones específicas para diferentes escenarios:
 
 ```php
 use Rmirandasv\Wompi\Exceptions\ConfigurationException;
 use Rmirandasv\Wompi\Exceptions\PaymentGatewayException;
+use Rmirandasv\Wompi\Exceptions\WompiValidationException;
 
 try {
     $response = Wompi::createPaymentLink($data);
+} catch (WompiValidationException $e) {
+    // Los datos proporcionados en los DTOs no son válidos
+    \Log::error('Validation error: ' . $e->getMessage(), $e->getErrors());
 } catch (ConfigurationException $e) {
     // Credenciales no configuradas correctamente
     \Log::error('Wompi configuration error: ' . $e->getMessage());
 } catch (PaymentGatewayException $e) {
-    // Error comunicándose con la API de Wompi
+    // Error comunicándose con la API de Wompi (e.g. 400 Bad Request, 401 Unauthorized)
     \Log::error('Wompi API error: ' . $e->getMessage());
+    
+    // Puedes acceder a los detalles del error devueltos por Wompi
+    $statusCode = $e->getStatusCode();
+    $wompiErrorBody = $e->getResponseBody();
 }
 ```
 
