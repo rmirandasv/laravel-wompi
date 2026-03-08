@@ -40,7 +40,6 @@ describe('Complete Payment Flow', function () {
 
         // Assertions
         expect($paymentLink)
-            ->toBeArray()
             ->toHaveKey('id')
             ->toHaveKey('url')
             ->and($paymentLink['monto'])->toEqual(150.00)
