@@ -1,3 +1,14 @@
+## 0.2.0 (2026-03-08)
+
+* Merge pull request #2 from rmirandasv/dev ([92f955b](https://github.com/rmirandasv/laravel-wompi/commit/92f955b)), closes [#2](https://github.com/rmirandasv/laravel-wompi/issues/2)
+* Merge pull request #3 from rmirandasv/dev ([8d4701e](https://github.com/rmirandasv/laravel-wompi/commit/8d4701e)), closes [#3](https://github.com/rmirandasv/laravel-wompi/issues/3)
+* Merge pull request #4 from rmirandasv/dev ([2f87612](https://github.com/rmirandasv/laravel-wompi/commit/2f87612)), closes [#4](https://github.com/rmirandasv/laravel-wompi/issues/4)
+* fix: remove composer.lock to support multiple PHP versions ([f4fee1d](https://github.com/rmirandasv/laravel-wompi/commit/f4fee1d))
+* fix: use composer update --prefer-stable in CI for better PHP compatibility ([cef2abf](https://github.com/rmirandasv/laravel-wompi/commit/cef2abf))
+* chore: update composer package version ([40f4f32](https://github.com/rmirandasv/laravel-wompi/commit/40f4f32))
+* chore: update package version ([be40f06](https://github.com/rmirandasv/laravel-wompi/commit/be40f06))
+* feat: add support for PHP 8.4/8.5 and bump version to 0.2.0 ([eda5136](https://github.com/rmirandasv/laravel-wompi/commit/eda5136))
+
 ## 0.1.0 (2026-03-08)
 
 * Merge pull request #1 from rmirandasv/dev ([fdbeddd](https://github.com/rmirandasv/laravel-wompi/commit/fdbeddd)), closes [#1](https://github.com/rmirandasv/laravel-wompi/issues/1)
