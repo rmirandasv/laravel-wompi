@@ -2,6 +2,8 @@
 
 namespace Rmirandasv\Wompi\DTOs\Requests;
 
+use Rmirandasv\Wompi\Exceptions\WompiValidationException;
+
 class PaymentLinkRequestDTO
 {
     public function __construct(
@@ -11,7 +13,21 @@ class PaymentLinkRequestDTO
         public readonly array $formaPago = [],
         public readonly array $configuracion = [],
         public readonly array $extraData = []
-    ) {}
+    ) {
+        $this->validate();
+    }
+
+    private function validate(): void
+    {
+        $errors = [];
+        if ($this->monto <= 0) {
+            $errors['monto'] = ['El monto debe ser mayor a 0.'];
+        }
+        
+        if (!empty($errors)) {
+            throw new WompiValidationException('Datos de enlace de pago inválidos.', $errors);
+        }
+    }
 
     public static function fromArray(array $data): self
     {

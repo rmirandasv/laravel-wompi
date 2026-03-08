@@ -2,6 +2,8 @@
 
 namespace Rmirandasv\Wompi\DTOs\Requests;
 
+use Rmirandasv\Wompi\Exceptions\WompiValidationException;
+
 class Transaction3DSRequestDTO
 {
     public function __construct(
@@ -11,7 +13,24 @@ class Transaction3DSRequestDTO
         public readonly string $mesExpiracion = '',
         public readonly string $anioExpiracion = '',
         public readonly array $extraData = []
-    ) {}
+    ) {
+        $this->validate();
+    }
+
+    private function validate(): void
+    {
+        $errors = [];
+        if ($this->monto <= 0) {
+            $errors['monto'] = ['El monto debe ser mayor a 0.'];
+        }
+        if (empty($this->numeroTarjeta)) {
+            $errors['numeroTarjeta'] = ['El número de tarjeta es obligatorio.'];
+        }
+        
+        if (!empty($errors)) {
+            throw new WompiValidationException('Datos de transacción 3DS inválidos.', $errors);
+        }
+    }
 
     public static function fromArray(array $data): self
     {
