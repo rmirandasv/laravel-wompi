@@ -80,20 +80,61 @@ class WompiClient implements WompiClientInterface
         try {
             $accessToken = $this->getAccessToken();
             $url = sprintf('%s/%s', rtrim($this->apiUrl, '/'), ltrim($endpoint, '/'));
-            Log::info($url);
+            
+            $startTime = microtime(true);
+            Log::info("Wompi API Request: {$method} {$endpoint}", [
+                'url' => $url,
+                // Mask sensitive card numbers if present before logging
+                'payload' => $this->maskSensitiveData($data),
+            ]);
 
             $response = Http::withToken($accessToken)
                 ->$method($url, $data)
                 ->throw();
 
+            $duration = round((microtime(true) - $startTime) * 1000, 2);
+            Log::info("Wompi API Response: {$method} {$endpoint}", [
+                'status' => $response->status(),
+                'duration_ms' => $duration,
+            ]);
+
             return $response->json() ?? [];
         } catch (RequestException $e) {
+            $response = $e->response;
+            $statusCode = $response->status();
+            $errorBody = $response->json();
+            
             Log::error("Wompi API request failed: {$method} {$endpoint}", [
-                'error' => $e->getMessage(),
-                'data' => $data,
+                'status' => $statusCode,
+                'error_body' => $errorBody,
+                'payload' => $this->maskSensitiveData($data),
+                'headers' => $response->headers(),
             ]);
-            throw new PaymentGatewayException("API request failed: {$endpoint}", 0, $e);
+            
+            $message = "API request failed: {$endpoint}. ";
+            if (isset($errorBody['mensaje'])) {
+                $message .= "Reason: " . $errorBody['mensaje'];
+            } elseif (isset($errorBody['message'])) {
+                $message .= "Reason: " . $errorBody['message'];
+            }
+
+            throw new PaymentGatewayException($message, 0, $e, $errorBody, $statusCode);
         }
+    }
+
+    /**
+     * Masks sensitive data like credit card numbers for logging purposes.
+     */
+    private function maskSensitiveData(array $data): array
+    {
+        $masked = $data;
+        if (isset($masked['numeroTarjeta'])) {
+            $masked['numeroTarjeta'] = substr($masked['numeroTarjeta'], 0, 4) . '********' . substr($masked['numeroTarjeta'], -4);
+        }
+        if (isset($masked['cvv'])) {
+            $masked['cvv'] = '***';
+        }
+        return $masked;
     }
 
     /**
