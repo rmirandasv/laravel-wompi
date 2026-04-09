@@ -1,3 +1,14 @@
+## 1.0.0 (2026-03-08)
+
+* feat!: release version 1.0.0 ([bb4b5b2](https://github.com/rmirandasv/laravel-wompi/commit/bb4b5b2))
+* Merge pull request #5 from rmirandasv/dev ([79d39e9](https://github.com/rmirandasv/laravel-wompi/commit/79d39e9)), closes [#5](https://github.com/rmirandasv/laravel-wompi/issues/5)
+* chore: remove version from composer.josn and package.json ([de1cd12](https://github.com/rmirandasv/laravel-wompi/commit/de1cd12))
+
+
+### BREAKING CHANGE
+
+* Official release of Laravel Wompi v1.0.0 with improved architecture, DTOs, and event support.
+
 ## 0.2.0 (2026-03-08)
 
 * Merge pull request #2 from rmirandasv/dev ([92f955b](https://github.com/rmirandasv/laravel-wompi/commit/92f955b)), closes [#2](https://github.com/rmirandasv/laravel-wompi/issues/2)
