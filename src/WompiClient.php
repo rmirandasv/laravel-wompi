@@ -281,7 +281,7 @@ class WompiClient implements WompiClientInterface
      * 
      * @see https://docs.wompi.sv/redirect-url/validar-parametros-url-redirect
      */
-    public function validateRedirectParams(array $params, string $receivedHash): boo
+    public function validateRedirectParams(array $params, string $receivedHash): bool
     {
         if (! $this->clientSecret) {
             throw new ConfigurationException('Wompi client secret is not set');
