@@ -1,3 +1,10 @@
+## <small>1.0.1 (2026-04-09)</small>
+
+* Merge branch 'main' of github.com:rmirandasv/laravel-wompi ([24f693d](https://github.com/rmirandasv/laravel-wompi/commit/24f693d))
+* Merge pull request #6 from rmirandasv/tests/update-wompi-client-test ([13a565c](https://github.com/rmirandasv/laravel-wompi/commit/13a565c)), closes [#6](https://github.com/rmirandasv/laravel-wompi/issues/6)
+* fix: correct return type of validateRedirectParams ([42b62f3](https://github.com/rmirandasv/laravel-wompi/commit/42b62f3))
+* bugfix: redirect link validation based on concatenated or json params ([9df87de](https://github.com/rmirandasv/laravel-wompi/commit/9df87de))
+
 ## 1.0.0 (2026-03-08)
 
 * feat!: release version 1.0.0 ([bb4b5b2](https://github.com/rmirandasv/laravel-wompi/commit/bb4b5b2))
