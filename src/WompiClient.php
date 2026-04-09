@@ -281,23 +281,51 @@ class WompiClient implements WompiClientInterface
      * 
      * @see https://docs.wompi.sv/redirect-url/validar-parametros-url-redirect
      */
-    public function validateRedirectParams(array $params, string $receivedHash): bool
+    public function validateRedirectParams(array $params, string $receivedHash): boo
     {
         if (! $this->clientSecret) {
-            throw new ConfigurationException('Wompi webhook secret is not set');
+            throw new ConfigurationException('Wompi client secret is not set');
         }
-
-        $concatenated = ($params['idTransaccion'] ?? '') .
-                       ($params['monto'] ?? '') .
-                       ($params['esReal'] ?? '') .
-                       ($params['formaPago'] ?? '') .
-                       ($params['esAprobada'] ?? '') .
-                       ($params['codigoAutorizacion'] ?? '') .
-                       ($params['mensaje'] ?? '');
-
-        $calculatedHash = hash_hmac('sha256', $concatenated, $this->clientSecret);
-
+        $payload = $this->redirectParamsConcatenated($params);
+        $calculatedHash = hash_hmac('sha256', $payload, $this->clientSecret);
         return hash_equals($calculatedHash, $receivedHash);
+    }
+
+    private function redirectParamsConcatenated(array $params): string
+    {
+        if ($this->isPaymentLinkRedirect($params)) {
+            return $this->stringParam($params, ['identificadorEnlaceComercio', 'IdentificadorEnlaceComercio'])
+                .$this->stringParam($params, ['idTransaccion', 'IdTransaccion'])
+                .$this->stringParam($params, ['idEnlace', 'IdEnlace'])
+                .$this->stringParam($params, ['monto', 'Monto']);
+        }
+        return $this->stringParam($params, ['idTransaccion', 'IdTransaccion'])
+            .$this->stringParam($params, ['monto', 'Monto'])
+            .$this->stringParam($params, ['esReal', 'EsReal'])
+            .$this->stringParam($params, ['formaPago', 'FormaPago'])
+            .$this->stringParam($params, ['esAprobada', 'EsAprobada'])
+            .$this->stringParam($params, ['codigoAutorizacion', 'CodigoAutorizacion'])
+            .$this->stringParam($params, ['mensaje', 'Mensaje']);
+    }
+
+    private function isPaymentLinkRedirect(array $params): bool
+    {
+        $ref = $this->stringParam($params, ['identificadorEnlaceComercio', 'IdentificadorEnlaceComercio']);
+        return $ref !== '';
+    }
+
+    /**
+     * @param  list<string>  $keys
+     */
+    private function stringParam(array $params, array $keys): string
+    {
+        foreach ($keys as $key) {
+            $value = $params[$key] ?? null;
+            if ($value !== null && $value !== '' && is_scalar($value)) {
+                return (string) $value;
+            }
+        }
+        return '';
     }
 
     /**
