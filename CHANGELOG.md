@@ -1,3 +1,8 @@
+## <small>1.0.2 (2026-04-10)</small>
+
+* Merge pull request #7 from rmirandasv/feat/laravel-wompi-skill ([39feade](https://github.com/rmirandasv/laravel-wompi/commit/39feade)), closes [#7](https://github.com/rmirandasv/laravel-wompi/issues/7)
+* docs: improve AI skill and add integration section to README ([bae7949](https://github.com/rmirandasv/laravel-wompi/commit/bae7949))
+
 ## <small>1.0.1 (2026-04-09)</small>
 
 * Merge branch 'main' of github.com:rmirandasv/laravel-wompi ([24f693d](https://github.com/rmirandasv/laravel-wompi/commit/24f693d))
