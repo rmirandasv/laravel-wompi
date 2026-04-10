@@ -499,6 +499,19 @@ Para más detalles sobre los parámetros y respuestas de cada endpoint, consulta
 - [Cargos Recurrentes](https://docs.wompi.sv/metodos-api/cargos-recurrentes)
 - [Webhooks](https://docs.wompi.sv/webhook/definicion-webhook)
 
+## 🤖 Integración con IA (Prompt-to-Code)
+
+Este paquete incluye una **Skill/Regla de IA** diseñada para que puedas integrar pagos en minutos usando asistentes como **Cursor, Windsurf, Claude Dev o Gemini CLI**.
+
+La skill proporciona el contexto técnico necesario para que la IA genere controladores, rutas y validaciones siguiendo las mejores prácticas de seguridad de Wompi.
+
+### Cómo usar la Skill:
+1.  **Cursor/Windsurf**: Copia el archivo `laravel-wompi-skill/SKILL.md` a la carpeta `.cursor/rules/wompi.md` (o similar) en tu proyecto.
+2.  **Gemini CLI**: Importa la skill o proporciónale el archivo como contexto.
+3.  **Prompt**: Pídele a tu IA: *"Integra checkout con Wompi: enlace de pago, retorno con validación de hash y webhook usando eventos; utiliza rmirandasv/laravel-wompi >= 1.0.1"*.
+
+Encuentra la guía detallada en [laravel-wompi-skill/SKILL.md](laravel-wompi-skill/SKILL.md).
+
 ## 🤝 Contribuciones
 
 Las contribuciones son bienvenidas. Por favor:
