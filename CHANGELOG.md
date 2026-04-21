@@ -1,3 +1,8 @@
+## 1.1.0 (2026-04-21)
+
+* Merge pull request #8 from rmirandasv/feat/laravel13-support ([53c511c](https://github.com/rmirandasv/laravel-wompi/commit/53c511c)), closes [#8](https://github.com/rmirandasv/laravel-wompi/issues/8)
+* feat: Laravel 13 support ([4a2d0c2](https://github.com/rmirandasv/laravel-wompi/commit/4a2d0c2))
+
 ## <small>1.0.2 (2026-04-10)</small>
 
 * Merge pull request #7 from rmirandasv/feat/laravel-wompi-skill ([39feade](https://github.com/rmirandasv/laravel-wompi/commit/39feade)), closes [#7](https://github.com/rmirandasv/laravel-wompi/issues/7)
