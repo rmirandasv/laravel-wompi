@@ -6,7 +6,7 @@ A complete and robust Laravel package for integrating the **Wompi** payment gate
 
 ### Main Technologies
 - **PHP**: ^8.2 (Supports 8.2, 8.3, 8.4, 8.5)
-- **Laravel**: 10.x, 11.x, 12.x
+- **Laravel**: 10.x, 11.x, 12.x, 13.x
 - **Testing**: [Pest PHP](https://pestphp.com)
 - **HTTP Client**: Laravel's `Http` facade (Guzzle wrapper)
 
