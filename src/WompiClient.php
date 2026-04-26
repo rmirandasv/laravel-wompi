@@ -9,9 +9,11 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Rmirandasv\Wompi\Contracts\WompiClientInterface;
 use Rmirandasv\Wompi\DTOs\Requests\PaymentLinkRequestDTO;
+use Rmirandasv\Wompi\DTOs\Requests\RecurringPaymentLinkRequestDTO;
 use Rmirandasv\Wompi\DTOs\Requests\TokenizeCardRequestDTO;
 use Rmirandasv\Wompi\DTOs\Requests\Transaction3DSRequestDTO;
 use Rmirandasv\Wompi\DTOs\Responses\PaymentLinkResponseDTO;
+use Rmirandasv\Wompi\DTOs\Responses\RecurringPaymentLinkResponseDTO;
 use Rmirandasv\Wompi\DTOs\Responses\TokenizedCardResponseDTO;
 use Rmirandasv\Wompi\DTOs\Responses\TransactionResponseDTO;
 use Rmirandasv\Wompi\Events\WompiPaymentProcessed;
@@ -212,6 +214,59 @@ class WompiClient implements WompiClientInterface
     public function createRecurringCharge(array $data): array
     {
         return $this->makeAuthenticatedRequest('post', 'CargoRecurrente', $data);
+    }
+
+    /**
+     * Create a recurring payment link (Subscription)
+     *
+     * @see https://docs.wompi.sv/metodos-api/crear-enlace-pago-recurrentes
+     */
+    public function createRecurringPaymentLink(array|RecurringPaymentLinkRequestDTO $data): RecurringPaymentLinkResponseDTO|array
+    {
+        $payload = $data instanceof RecurringPaymentLinkRequestDTO ? $data->toArray() : $data;
+        $response = $this->makeAuthenticatedRequest('post', 'EnlacePagoRecurrente', $payload);
+
+        return new RecurringPaymentLinkResponseDTO($response);
+    }
+
+    /**
+     * Get a recurring payment link by ID
+     */
+    public function getRecurringPaymentLink(string $id): array
+    {
+        return $this->makeAuthenticatedRequest('get', "EnlacePagoRecurrente/{$id}");
+    }
+
+    /**
+     * Get a list of recurring payment links
+     */
+    public function getRecurringPaymentLinks(): array
+    {
+        return $this->makeAuthenticatedRequest('get', 'EnlacePagoRecurrente');
+    }
+
+    /**
+     * Update a recurring payment link
+     */
+    public function updateRecurringPaymentLink(string $id, array $data): array
+    {
+        return $this->makeAuthenticatedRequest('put', "EnlacePagoRecurrente/{$id}", $data);
+    }
+
+    /**
+     * Deactivate a recurring payment link
+     */
+    public function deactivateRecurringPaymentLink(string $id): array
+    {
+        return $this->makeAuthenticatedRequest('post', "EnlacePagoRecurrente/{$id}");
+    }
+
+    /**
+     * Get subscribers of a recurring payment link
+     */
+    public function getRecurringPaymentLinkSubscribers(string $id): array
+    {
+        return $this->makeAuthenticatedRequest('get', "EnlacePagoRecurrente/{$id}/suscrpciones");
     }
 
     /**

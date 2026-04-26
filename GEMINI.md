@@ -73,6 +73,7 @@ Variables required in `.env`:
 - `createTransaction3DS(array $data)`: Proceses 3D Secure transactions.
 - `tokenizeCard(array $data)`: Stores cards securely for future use.
 - `createRecurringCharge(array $data)`: Processes payments with tokenized cards.
+- `createRecurringPaymentLink(array $data)`: Creates subscription payment links.
 - `validateWebhookRequest(Request $request)`: Validates HMAC signatures of incoming notifications.
 - `validateRedirectParams(array $params, string $hash)`: Validates return URL parameters.
 

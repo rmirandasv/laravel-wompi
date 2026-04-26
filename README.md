@@ -10,6 +10,7 @@ Un paquete de Laravel completo y robusto para integrar la pasarela de pago [Womp
 ## 📋 Características
 
 - ✅ **Enlace de Pago** - Genera URLs y códigos QR para pagos
+- ✅ **Suscripciones** - Crea enlaces de pago recurrente para suscripciones
 - ✅ **Transacciones 3DS** - Soporte completo para pagos con 3D Secure
 - ✅ **Tokenización** - Almacena tarjetas de forma segura para uso futuro
 - ✅ **Cargos Recurrentes** - Procesa pagos recurrentes con tarjetas tokenizadas
@@ -153,6 +154,28 @@ $response = Wompi::createRecurringCharge([
 
 $transactionId = $response['idTransaccion'];
 $isApproved = $response['esAprobada'] ?? false;
+```
+
+### Suscripciones (Enlaces de Pago Recurrente)
+
+Crea un enlace para que tus clientes se suscriban a un pago mensual:
+
+```php
+$response = Wompi::createRecurringPaymentLink([
+    'diaDePago' => 15,
+    'nombre' => 'Suscripción Premium',
+    'idAplicativo' => 'app_12345',
+    'monto' => 25.00,
+    'descripcionProducto' => 'Membresía mensual premium',
+]);
+
+$subscriptionId = $response['idEnlace'];
+$subscriptionUrl = $response['urlEnlace'];
+$subscriptionQrUrl = $response['urlQrCodeEnlace'];
+
+// Puedes consultar, editar o desactivar enlaces recurrentes:
+$link = Wompi::getRecurringPaymentLink($subscriptionId);
+Wompi::deactivateRecurringPaymentLink($subscriptionId);
 ```
 
 ### Consultar Datos del Aplicativo
@@ -425,7 +448,13 @@ try {
 | `tokenizeCard(array\|TokenizeCardRequestDTO $data)` | Tokeniza una tarjeta |
 | `getTokenizedCard(string $tokenId)` | Obtiene información de un token |
 | `deleteTokenizedCard(string $tokenId)` | Elimina un token |
-| `createRecurringCharge(array $data)` | Crea un cargo recurrente |
+| `createRecurringCharge(array $data)` | Crea un cargo recurrente con token |
+| `createRecurringPaymentLink(array\|RecurringPaymentLinkRequestDTO $data)` | Crea enlace de pago recurrente (suscripción) |
+| `getRecurringPaymentLink(string $id)` | Obtiene un enlace recurrente |
+| `getRecurringPaymentLinks()` | Lista enlaces recurrentes |
+| `updateRecurringPaymentLink(string $id, array $data)` | Actualiza un enlace recurrente |
+| `deactivateRecurringPaymentLink(string $id)` | Desactiva un enlace recurrente |
+| `getRecurringPaymentLinkSubscribers(string $id)` | Obtiene suscritos de un enlace |
 | `getAplicativoData()` | Obtiene datos del aplicativo |
 | `executeTestTransaction(array $data)` | Ejecuta transacción de prueba |
 | `validateWebhookRequest(Request $request)` | Valida un webhook |
@@ -496,7 +525,8 @@ Para más detalles sobre los parámetros y respuestas de cada endpoint, consulta
 - [Crear Enlace de Pago](https://docs.wompi.sv/metodos-api/enlace-de-pago)
 - [Transacciones 3DS](https://docs.wompi.sv/metodos-api/crear-transaccion-compra-3ds)
 - [Tokenización](https://docs.wompi.sv/metodos-api/tokenizacion)
-- [Cargos Recurrentes](https://docs.wompi.sv/metodos-api/cargos-recurrentes)
+- [Cargos Recurrentes (Suscripciones)](https://docs.wompi.sv/metodos-api/crear-enlace-pago-recurrentes)
+- [Cargos Recurrentes (Con Token)](https://docs.wompi.sv/metodos-api/cargos-recurrentes)
 - [Webhooks](https://docs.wompi.sv/webhook/definicion-webhook)
 
 ## 🤖 Integración con IA (Prompt-to-Code)

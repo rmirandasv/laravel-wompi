@@ -80,6 +80,36 @@ describe('WompiClient API Calls', function () {
             ->and($result['estado'])->toBe('Pendiente');
     });
 
+    it('can create a recurring payment link', function () {
+        Http::fake([
+            'https://id.wompi.sv/test' => Http::response([
+                'access_token' => 'test_token',
+                'expires_in' => 3600,
+            ], 200),
+            'https://api.wompi.sv/v1/test/EnlacePagoRecurrente' => Http::response([
+                'idEnlace' => 'rec_link_123',
+                'urlEnlaceLargo' => 'https://wompi.sv/long/rec_link_123',
+                'urlEnlace' => 'https://wompi.sv/rec_link_123',
+                'estaProductivo' => true,
+                'urlQrCodeEnlace' => 'https://wompi.sv/qr/rec_link_123',
+            ], 201),
+        ]);
+
+        $client = app(WompiClient::class);
+        $result = $client->createRecurringPaymentLink([
+            'diaDePago' => 15,
+            'nombre' => 'Suscripcion Premium',
+            'idAplicativo' => 'app_123',
+            'monto' => 25.00,
+            'descripcionProducto' => 'Membresia mensual premium',
+        ]);
+
+        expect($result)
+            ->toHaveKey('idEnlace')
+            ->and($result['idEnlace'])->toBe('rec_link_123')
+            ->and($result['urlEnlace'])->toBe('https://wompi.sv/rec_link_123');
+    });
+
     it('can tokenize a card', function () {
         Http::fake([
             'https://id.wompi.sv/test' => Http::response([
