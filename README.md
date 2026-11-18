@@ -1,524 +1,470 @@
 # Laravel Wompi
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![PHP Version](https://img.shields.io/badge/php-%5E8.2-8892BF.svg)](https://php.net)
-[![PHP 8.4](https://img.shields.io/badge/php-8.4-blue.svg)](https://php.net)
+[![PHP Version](https://img.shields.io/badge/php-%5E8.2.35%20%7C%20%5E8.3.36%20%7C%20%5E8.4.27%20%7C%20%5E8.5.12-8892BF.svg)](https://php.net)
 [![Laravel Version](https://img.shields.io/badge/laravel-10%2B%7C11%2B%7C12%2B%7C13%2B-FF2D20.svg)](https://laravel.com)
 
-Un paquete de Laravel completo y robusto para integrar la pasarela de pago [Wompi](https://wompi.sv) de El Salvador en tus aplicaciones. Soporte oficial para PHP 8.2, 8.3, 8.4 y 8.5.
+Un paquete de Laravel para integrar la pasarela de pago [Wompi](https://wompi.sv) de El Salvador en tus aplicaciones.
+
+> [!IMPORTANT]
+> **v2.0 es un cambio incompatible.** En v1 todos los endpoints del API estaban rotos (ver [UPGRADE.md](UPGRADE.md)). Si vienes de v1, lee [UPGRADE.md](UPGRADE.md) antes de actualizar.
 
 ## 📋 Características
 
-- ✅ **Enlace de Pago** - Genera URLs y códigos QR para pagos
-- ✅ **Transacciones 3DS** - Soporte completo para pagos con 3D Secure
-- ✅ **Tokenización** - Almacena tarjetas de forma segura para uso futuro
-- ✅ **Cargos Recurrentes** - Procesa pagos recurrentes con tarjetas tokenizadas
-- ✅ **Validación de Webhooks** - Verificación HMAC de notificaciones
-- ✅ **Validación de Redirects** - Valida parámetros de URL de retorno
-- ✅ **Datos del Aplicativo** - Consulta configuración y capacidades
-- ✅ **Transacciones de Prueba** - Entorno de desarrollo/testing
-- ✅ **Autenticación OAuth2** - Gestión automática de tokens con caché
-- ✅ **Facade Laravel** - Interfaz limpia y expresiva
+- ✅ **Enlace de Pago** — Crea, consulta, actualiza, activa, desactiva y personaliza enlaces de pago
+- ✅ **Transacciones 3DS** — Pagos con 3D Secure (datos del cliente y de la tarjeta anidados como los exige Wompi)
+- ✅ **Cargos tokenizados** — Cobra una tarjeta tokenizada sin 3D Secure
+- ✅ **Tokenización** — Guarda tarjetas de forma segura para uso futuro
+- ✅ **Suscripciones** — Enlaces de pago recurrentes (`EnlacePagoRecurrente`) y consulta de suscriptores
+- ✅ **Consulta de transacciones** — Detalle, listado, comprobante y estadísticas diarias
+- ✅ **Webhooks** — Verificación HMAC, normalización del payload y eventos de Laravel
+- ✅ **Validación de Redirect** — Verifica los parámetros de la URL de retorno
+- ✅ **Ruta publicable** — Endpoint de webhook listo para usar con `vendor:publish`
+- ✅ **Autenticación OAuth2** — Token cacheado con lock, margen de expiración y recuperación ante 401
+- ✅ **Seguro por diseño** — PAN y CVV nunca llegan a los logs
 
 ## 📦 Instalación
-
-Instala el paquete vía Composer:
 
 ```bash
 composer require rmirandasv/laravel-wompi
 ```
 
-El paquete se auto-registra automáticamente gracias al auto-discovery de Laravel.
+El paquete se auto-registra gracias al auto-discovery de Laravel.
 
-### Publicar Configuración (Opcional)
+### Publicar la configuración (opcional)
 
 ```bash
 php artisan vendor:publish --tag="wompi-config"
 ```
 
-Esto creará el archivo `config/wompi.php` en tu aplicación.
+### Publicar la ruta y el controlador del webhook (recomendado)
+
+```bash
+php artisan vendor:publish --tag="wompi-webhook"
+```
+
+Esto crea `routes/wompi.php` y `app/Http/Controllers/WompiWebhookController.php`.
 
 ## ⚙️ Configuración
 
-Agrega las siguientes variables a tu archivo `.env`:
-
 ```env
-WOMPI_AUTH_URL=https://id.wompi.sv
-WOMPI_API_URL=https://api.wompi.sv/v1
+WOMPI_API_URL=https://api.wompi.sv
+WOMPI_AUTH_URL=https://id.wompi.sv/connect/token
 WOMPI_CLIENT_ID=tu_client_id
 WOMPI_CLIENT_SECRET=tu_client_secret
-WOMPI_WEBHOOK_SECRET=tu_webhook_secret
 ```
 
-> 💡 **Nota**: Obtén tus credenciales desde tu dashboard de Wompi.
+> [!WARNING]
+> `WOMPI_API_URL` **no** lleva `/v1`. El prefijo `/v1` que aparece en el Swagger es la versión del documento OpenAPI, no del API: `https://api.wompi.sv/v1/EnlacePago` devuelve **404**.
+>
+> `WOMPI_AUTH_URL` apunta al endpoint OAuth2 `client_credentials`. La raíz `https://id.wompi.sv` devuelve una página HTML de login, no un token.
+
+El `client_id` es el **App ID** y el `client_secret` es el **API Secret** de tu negocio en el [panel de Wompi](https://panel.wompi.sv/).
+
+El mismo `client_secret` es la llave HMAC para validar webhooks y URLs de redirect: Wompi emite un solo secreto por aplicativo, por eso no existe un `WOMPI_WEBHOOK_SECRET` aparte.
+
+### Opciones adicionales
+
+```env
+WOMPI_TIMEOUT=30
+WOMPI_CONNECT_TIMEOUT=10
+WOMPI_RETRY=2
+WOMPI_TOKEN_TTL_MARGIN=60
+WOMPI_LOG_PAYLOADS=false
+WOMPI_WEBHOOK_PATH=webhooks/wompi
+```
 
 ## 🚀 Uso
 
-### Crear Enlace de Pago
-
-Genera un enlace de pago (Payment Link) para que tus clientes realicen pagos:
+### Crear enlace de pago
 
 ```php
 use Rmirandasv\Wompi\Facades\Wompi;
 
 $response = Wompi::createPaymentLink([
-    'identificadorEnlaceComercio' => 'ORDER-' . uniqid(),
-    'monto' => 100.00,
-    'nombreProducto' => 'Mi Producto',
+    'identificadorEnlaceComercio' => 'ORDER-' . $order->uuid,   // tu id de orden
+    'nombreProducto' => 'Camisa azul',
+    'monto' => 25.50,
     'formaPago' => [
         'permitirTarjetaCreditoDebido' => true,
         'permitirPagoConPuntoAgricola' => true,
         'permitirPagoEnCuotasAgricola' => false,
     ],
     'configuracion' => [
-        'urlRedirect' => 'https://tudominio.com/payment/success',
-        'urlRetorno' => 'https://tudominio.com/cart',
-        'emailsNotificacion' => '[email protected]',
-        'urlWebhook' => 'https://tudominio.com/webhooks/wompi',
+        'urlRedirect' => route('payment.return'),
+        'urlRetorno' => route('cart.index'),
+        'urlWebhook' => route('wompi.webhook'),
+        'emailsNotificacion' => 'pagos@tiapp.com',
         'notificarTransaccionCliente' => true,
     ],
 ]);
 
-// Respuesta
-$paymentUrl = $response['urlEnlace'];        // URL del enlace de pago
-$qrCodeUrl = $response['urlQrCodeEnlace'];   // URL del código QR
-$paymentId = $response['idEnlace'];          // ID del enlace
-$isProduction = $response['estaProductivo']; // true/false
-
-// Redirigir al usuario al enlace de pago
-return redirect($paymentUrl);
+return redirect($response->urlEnlace);
 ```
 
-### Crear Transacción 3DS
+El `identificadorEnlaceComercio` es tu **clave idempotente**: úsalo para relacionar el webhook con tu orden.
 
-Procesa una transacción directa con 3D Secure:
+También puedes usar el DTO, que valida los datos antes de llamar al API:
+
+```php
+use Rmirandasv\Wompi\DTOs\Requests\PaymentLinkRequestDTO;
+
+$response = Wompi::createPaymentLink(PaymentLinkRequestDTO::fromArray([...]));
+```
+
+### Transacción 3DS
+
+Wompi exige la tarjeta dentro de `tarjetaCreditoDebido` y los datos del cliente:
 
 ```php
 $response = Wompi::createTransaction3DS([
-    'monto' => 100.00,
-    'tarjeta' => [
+    'monto' => 25.50,
+    'tarjetaCreditoDebido' => [
         'numeroTarjeta' => '4111111111111111',
-        'mesExpiracion' => '12',
-        'anioExpiracion' => '2025',
         'cvv' => '123',
-        'nombreTarjeta' => 'JUAN PEREZ',
+        'mesVencimiento' => 12,
+        'anioVencimiento' => 2030,
+        'nombreEnTarjeta' => 'JUAN PEREZ',
     ],
-    'urlRedirect' => 'https://tudominio.com/payment/success',
-    'identificadorTransaccionComercio' => 'TXN-' . uniqid(),
+    'urlRedirect' => route('payment.return'),
+    'nombre' => 'JUAN',
+    'apellido' => 'PEREZ',
+    'email' => 'juan@example.com',
+    'ciudad' => 'SAN SALVADOR',
+    'direccion' => 'Calle 1 #2-3',
+    'idPais' => 'SV',
+    'idRegion' => 'SV-SS',
+    'codigoPostal' => '1101',
+    'telefono' => '70000000',
 ]);
 
-// Respuesta
-$transactionId = $response['idTransaccion'];
-$url3DS = $response['urlCompletarPago3Ds']; // URL para completar 3DS
-
-// Redirigir al cliente a la URL de 3DS
-return redirect($url3DS);
+return redirect($response->urlCompletarPago3Ds);
 ```
 
-### Tokenización de Tarjetas
+Los valores de `idPais` e `idRegion` los puedes obtener de `Wompi::getRegions()`.
 
-Guarda tarjetas de forma segura para pagos futuros:
+### Suscripciones (enlace de pago recurrente)
+
+Este es el mecanismo de suscripción de Wompi: tú creas el plan y el cliente se afilia solo al `urlEnlace` que devuelve Wompi.
 
 ```php
-// Tokenizar una tarjeta
-$response = Wompi::tokenizeCard([
-    'numeroTarjeta' => '4111111111111111',
-    'mesExpiracion' => '12',
-    'anioExpiracion' => '2025',
-    'cvv' => '123',
-    'nombreTarjeta' => 'JUAN PEREZ',
-    'identificadorCliente' => 'CUSTOMER-123',
+$subscription = Wompi::createRecurringPaymentLink([
+    'diaDePago' => 5,                 // día del mes en que se cobra
+    'nombre' => 'Plan mensual',
+    'monto' => 29.99,
+    'descripcionProducto' => 'Suscripción al plan mensual',
 ]);
 
-$tokenId = $response['idToken'];
+// Compartir $subscription->urlEnlace con el cliente
+// o $subscription->urlQrCodeEnlace para un código QR
+```
 
-// Obtener información de un token
-$tokenInfo = Wompi::getTokenizedCard($tokenId);
+Para ver quién está suscrito:
 
-// Eliminar un token
+```php
+$subscriptions = Wompi::listRecurringSubscriptions($subscription->idEnlace);
+
+foreach ($subscriptions->items() as $subscriber) {
+    $subscriber['idSuscriptor'];
+    $subscriber['pagosRealizados'];
+    $subscriber['estado'];
+}
+```
+
+> [!NOTE]
+> Si Wompi responde `403` al crear el enlace recurrente, el servicio de suscripciones debe estar habilitado para tu negocio: hay que solicitarlo a su soporte.
+
+Si en cambio ya **tienes** una tarjeta tokenizada y quieres cobrarla periódicamente, usa el cargo tokenizado (no necesita habilitación especial):
+
+```php
+$charge = Wompi::createTokenizedTransaction([
+    'tokenTarjeta' => $card->token,
+    'monto' => 29.99,
+    'nombreCliente' => 'JUAN PEREZ',
+    'emailCliente' => 'juan@example.com',
+]);
+```
+
+### Tokenización
+
+```php
+$token = Wompi::tokenizeCard([
+    'numeroTarjeta' => '4111111111111111',
+    'cvv' => '123',
+    'mesVencimiento' => 12,
+    'anioVencimiento' => 2030,
+    'nombreEnTarjeta' => 'JUAN PEREZ',
+]);
+
+$token->token;             // el token de la tarjeta
+$token->tarjetaEnmascarada; // "411111******1111"
+```
+
+Listar y eliminar tarjetas tokenizadas:
+
+```php
+$cards = Wompi::listTokenizedCards();      // PagedResultDTO
+$cards->items();
+$cards->total();
+
 Wompi::deleteTokenizedCard($tokenId);
 ```
 
-### Cargos Recurrentes
-
-Realiza cargos con tarjetas previamente tokenizadas:
+### Consultar transacciones
 
 ```php
-$response = Wompi::createRecurringCharge([
-    'idToken' => 'token_abc123',
-    'monto' => 50.00,
-    'identificadorTransaccionComercio' => 'RECURRING-' . uniqid(),
-    'descripcion' => 'Suscripción Mensual',
-]);
+$transaction = Wompi::getTransaction($id);
 
-$transactionId = $response['idTransaccion'];
-$isApproved = $response['esAprobada'] ?? false;
+$transaction->esAprobada;   // bool
+$transaction->esReal;       // bool: false = transacción de prueba
+$transaction->monto;
+$transaction->codigoAutorizacion;
+
+$transactions = Wompi::listTransactions(['ResultadoTransaccion' => 1]);
+$stats = Wompi::getDailyTransactionStats();
+$receipt = Wompi::getTransactionReceipt($id);       // contenido crudo
+$response = Wompi::getTransactionReceiptResponse($id); // Response completa
 ```
 
-### Consultar Datos del Aplicativo
+## 🔔 Webhooks
 
-Obtén información sobre las capacidades de tu aplicativo:
+### El flujo recomendado
 
-```php
-$aplicativoData = Wompi::getAplicativoData();
-
-// Información disponible:
-$soportaPuntos = $aplicativoData['soportaPagoConPuntos'];
-$soportaCuotas = $aplicativoData['soportaPagoEnCuotas'];
-$cuotasDisponibles = $aplicativoData['cuotasDisponibles'];
-```
-
-## 🔔 Webhooks y Eventos
-
-Los webhooks son la forma principal de recibir notificaciones de transacciones exitosas. El paquete ofrece múltiples formas de manejar estas notificaciones: a través de **Eventos de Laravel** o usando tu propio controlador.
-
-### 1. Usar Eventos de Laravel (Recomendado)
-
-El paquete despacha eventos automáticamente cuando valida un webhook exitosamente. Puedes escucharlos en tu aplicación:
-
-- `Rmirandasv\Wompi\Events\WompiWebhookReceived`: Se dispara siempre que se recibe y valida una notificación de Wompi, útil para guardar logs en crudo.
-- `Rmirandasv\Wompi\Events\WompiPaymentProcessed`: Se dispara junto al anterior, pero incluye la propiedad `$isSuccessful` (booleano) facilitando saber si el pago fue aprobado o no.
-
-**Ejemplo de Listener:**
+Publica la ruta y el controlador, y engancha tus listeners a los eventos:
 
 ```php
-namespace App\Listeners;
-
 use Rmirandasv\Wompi\Events\WompiPaymentProcessed;
 
 class ProcessWompiPayment
 {
     public function handle(WompiPaymentProcessed $event): void
     {
-        $payload = $event->payload;
-        $orderId = $payload['enlacePago']['identificadorEnlaceComercio'] ?? null;
-        
-        if ($event->isSuccessful) {
-            // Lógica para marcar orden como pagada...
-            \Log::info("Pago exitoso procesado para la orden: {$orderId}");
-        } else {
-            // Lógica para marcar orden como fallida...
+        if (! $event->isSuccessful) {
+            return;
         }
+
+        $order = Order::where('reference', $event->webhook->reference())->first();
+
+        $order?->update([
+            'status' => 'paid',
+            'transaction_id' => $event->webhook->idTransaccion(),
+            'paid_at' => now(),
+        ]);
     }
 }
 ```
 
-### 2. Middleware para validación
+Registra el listener en `app/Providers/EventServiceProvider.php` o con `Event::listen()`.
 
-Si decides crear tus propios endpoints y controladores para recibir los webhooks y no quieres llamar al método de validación manualmente, puedes usar el middleware incluido. 
+### La regla de oro: `EsProductiva`
 
-Primero aségurate de que tu ruta esté excluida del middleware CSRF y usa el alias `wompi.webhook`:
+El webhook incluye `EsProductiva`. Cuando es `false` **no se cobró al cliente**: fue una transacción de prueba.
 
 ```php
-Route::post('/webhooks/wompi', [WompiWebhookController::class, 'handle'])
-    ->withoutMiddleware([\App\Http\Middleware\VerifyCsrfToken::class])
-    ->middleware('wompi.webhook'); // <-- Validación automática de firma HMAC
+$event->isSuccessful;                 // true solo si fue aprobada Y fue un cobro real
+$event->webhook->isApproved();         // la transacción fue aprobada
+$event->webhook->isProduction();       // fue un cobro real
+$event->webhook->isTestTransaction();  // fue una prueba
 ```
 
-### 3. Crear tu Controlador Manual
+`isSuccessful` **nunca** es `true` para una transacción de prueba, así que una orden nunca se marca como pagada por un cobro que no ocurrió.
 
-Si prefieres manejar la validación manualmente dentro de tu controlador, puedes hacerlo así:
+### Normalización del payload
+
+Wompi no es consistente con las mayúsculas: el **webhook** usa PascalCase (`IdTransaccion`, `ResultadoTransaccion`, `Monto`) y las **respuestas del API** usan camelCase (`idTransaccion`, `resultadoTransaccion`, `monto`).
+
+El objeto `WompiWebhook` normaliza ambos casos, así que no tienes que preocuparte:
 
 ```php
-namespace App\Http\Controllers;
+$webhook->idTransaccion();
+$webhook->amount();
+$webhook->reference();      // EnlacePago.IdentificadorEnlaceComercio
+$webhook->productName();
+$webhook->paymentMethod();  // "TarjetaCreditoDebito", "PagoNormal", ...
+$webhook->authorizationCode();
+$webhook->occurredAt();
+$webhook->customer();
+$webhook->idempotencyKey(); // "idTransaccion:idIntentoPago"
+$webhook->raw();            // el payload original, intacto
+```
 
-use Illuminate\Http\Request;
-use Illuminate\Http\JsonResponse;
-use Rmirandasv\Wompi\Facades\Wompi;
-use Rmirandasv\Wompi\Exceptions\PaymentGatewayException;
+### Idempotencia
 
-class WompiWebhookController extends Controller
-{
-    public function handle(Request $request): JsonResponse
-    {
-        try {
-            // Validar y obtener datos del webhook (esto también dispara los eventos de arriba)
-            $webhookData = Wompi::validateWebhookRequest($request);
-            
-            // Verificar si es un pago exitoso manualmente
-            if (Wompi::isSuccessfulPayment($webhookData)) {
-                $this->processSuccessfulPayment($webhookData);
-            }
-            
-            // Siempre retornar 200 OK
-            return response()->json(['status' => 'ok'], 200);
-            
-        } catch (PaymentGatewayException $e) {
-            // Log del error pero retornar 200 para evitar reintentos
-            \Log::error('Webhook validation failed: ' . $e->getMessage());
-            return response()->json(['status' => 'ok'], 200);
-        }
-    }
-    
-    private function processSuccessfulPayment(array $data): void
-    {
-        $orderId = $data['enlacePago']['identificadorEnlaceComercio'];
-        $transactionId = $data['idTransaccion'];
-        $amount = $data['monto'];
-        
-        // Actualizar tu orden en la base de datos
-        $order = Order::where('reference', $orderId)->first();
-        
-        if ($order && !$order->is_paid) {
-            $order->update([
-                'status' => 'paid',
-                'transaction_id' => $transactionId,
-                'payment_method' => $data['formaPagoUtilizada'],
-                'paid_at' => now(),
-            ]);
-            
-            // Disparar eventos, enviar emails, etc.
-            event(new OrderPaid($order));
-        }
-    }
+Wompi reintenta la entrega de un webhook si no recibe un 2xx, así que **el mismo pago puede llegar más de una vez**. Usa `idempotencyKey()` para hacer tu handler idempotente:
+
+```php
+if (Cache::has("wompi:{$event->webhook->idempotencyKey()}")) {
+    return;
 }
+Cache::put("wompi:{$event->webhook->idempotencyKey()}", true, now()->addMinutes(10));
 ```
 
-### 2. Registrar tu Ruta
-
-En `routes/api.php` o `routes/web.php`:
+### Validar el redirect
 
 ```php
-use App\Http\Controllers\WompiWebhookController;
-
-Route::post('/webhooks/wompi', [WompiWebhookController::class, 'handle'])
-    ->withoutMiddleware([\App\Http\Middleware\VerifyCsrfToken::class]);
-```
-
-### 3. Configurar en Wompi Dashboard
-
-Configura tu webhook URL en el dashboard de Wompi:
-
-```
-https://tudominio.com/webhooks/wompi
-```
-
-### Datos Disponibles en el Webhook
-
-```php
-$webhookData = [
-    'idCuenta' => 'string',
-    'fechaTransaccion' => 'string',
-    'monto' => 100.00,
-    'moduloUtilizado' => 'EnlacePago',
-    'formaPagoUtilizada' => 'TarjetaCreditoDebito',
-    'idTransaccion' => 'TXN123',
-    'resultadoTransaccion' => 'ExitosaAprobada',
-    'codigoAutorizacion' => 'AUTH123',
-    'idIntentoPago' => 'string',
-    'cantidad' => 1,
-    'esProductiva' => true,
-    'aplicativo' => [...],
-    'enlacePago' => [
-        'idEnlace' => 123,
-        'identificadorEnlaceComercio' => 'ORDER-123',
-        'nombreProducto' => 'Mi Producto',
-    ],
-    'cliente' => [
-        'nombre' => 'Juan Pérez',
-        'email' => '[email protected]',
-        ...
-    ],
-];
-```
-
-## 🔄 Validación de Redirect URLs
-
-Cuando el usuario regresa de Wompi, valida los parámetros:
-
-```php
-use Rmirandasv\Wompi\Facades\Wompi;
-
 public function paymentReturn(Request $request)
 {
-    $params = $request->all();
-    $receivedHash = $request->input('hash');
-    
-    // Validar la firma
-    if (Wompi::validateRedirectParams($params, $receivedHash)) {
-        if ($params['esAprobada'] === 'true') {
-            // Pago aprobado
-            return view('payment.success', [
-                'transactionId' => $params['idTransaccion'],
-            ]);
-        } else {
-            // Pago rechazado
-            return view('payment.failed', [
-                'message' => $params['mensaje'],
-            ]);
-        }
+    $params = $request->query();
+
+    if (! Wompi::validateRedirectParams($params, (string) $request->input('hash'))) {
+        abort(403, 'Firma inválida');
     }
-    
-    // Firma inválida
-    abort(403, 'Invalid signature');
+
+    if (Wompi::isRedirectApproved($params)) {
+        return view('payment.success', ['id' => $params['idTransaccion']]);
+    }
+
+    return view('payment.failed', ['message' => $params['mensaje']]);
 }
 ```
 
-## 🧪 Transacciones de Prueba
+`isRedirectApproved()` evalúa `esAprobada` sin distinguir mayúsculas, porque Wompi envía `"true"` o `"True"`.
 
-Para desarrollo y testing:
+> [!WARNING]
+> La URL de redirect depende del navegador del pagador: puede no llegar. Confirma siempre el pago con el webhook **y** el redirect, como recomienda Wompi.
+
+## 🧪 Modo prueba
+
+Wompi **no tiene un endpoint de transacción de prueba**. El modo de prueba se activa putting tu negocio en modo desarrollo en el [panel de Wompi](https://panel.wompi.sv/), y para simular un cobro rechazado se envía `111` en el CVV.
 
 ```php
-$response = Wompi::executeTestTransaction([
-    'monto' => 100.00,
-    'resultadoDeseado' => 'Aprobada', // o 'Rechazada'
-    'identificadorTransaccionComercio' => 'TEST-' . uniqid(),
-]);
+$aplicativo = Wompi::getAplicativoData();
+$aplicativo->estaProductivo;   // false = el negocio está en modo prueba
 ```
 
-## 🔧 Inyección de Dependencias
+## 🛡️ Seguridad
 
-También puedes usar inyección de dependencias en lugar de la Facade. El paquete expone un contrato (`Interface`) para facilitar el testing y desacoplar tu código:
+### PHP2Shell
+
+El paquete requiere **PHP 8.2.35 o superior** porque las versiones anteriores son vulnerables a **CVE-2026-109618** y **CVE-2026-109619** (colectivamente *PHP2Shell*): dos RCE sin autenticación con CVSS 9.2, divulgadas el 21 de octubre de 2026 y ya en el [catálogo KEV de CISA](https://www.cisa.gov/news-events/alerts/2026/10/21/critical-vulnerabilities-php-require-immediate-patching).
+
+| Rama | Versión mínima segura |
+|---|---|
+| 8.2 | 8.2.35 |
+| 8.3 | 8.3.36 |
+| 8.4 | 8.4.27 |
+| 8.5 | 8.5.12 |
+
+### Datos de tarjeta
+
+- El PAN y el CVV **nunca** se escriben en los logs. El enmascarado es recursivo, así que también cubre `tarjetaCreditoDebido.numeroTarjeta`, y cualquier valor con forma de número de tarjeta se enmascara aunque Wompi lo renombre.
+- Los payloads no se registran a menos que actives `WOMPI_LOG_PAYLOADS=true`, y aun así se enmascaran.
+- `getAplicativoData()` y `getAplicativoById()` **redactan** el `clientSecret` que el API devuelve.
+
+### Firma de los webhooks
+
+La firma HMAC se compara con `hash_equals()`, y una firma inválida se rechaza con **403** (nunca 200), para que los intentos de falsificación queden registrados.
+
+## 📚 Métodos disponibles
+
+| Método | Descripción |
+|--------|-------------|
+| `createPaymentLink()` | Crea un enlace de pago |
+| `listPaymentLinks()` | Lista los enlaces de pago |
+| `getPaymentLink()` | Obtiene un enlace de pago |
+| `updatePaymentLink()` | Actualiza un enlace de pago |
+| `activatePaymentLink()` | Reactiva un enlace de pago |
+| `deactivatePaymentLink()` | Desactiva un enlace de pago |
+| `addPaymentLinkImage()` | Sube una imagen del botón de pago |
+| `deletePaymentLinkImage()` | Elimina una imagen del botón de pago |
+| `createTransaction3DS()` | Crea una transacción con 3DS |
+| `createTokenizedTransaction()` | Cobra una tarjeta tokenizada sin 3DS |
+| `getTransaction()` | Consulta una transacción |
+| `listTransactions()` | Lista las transacciones |
+| `getTransactionReceipt()` | Descarga el comprobante |
+| `getTransactionReceiptResponse()` | Descarga el comprobante como `Response` |
+| `getDailyTransactionStats()` | Estadísticas diarias |
+| `tokenizeCard()` | Tokeniza una tarjeta |
+| `listTokenizedCards()` | Lista las tarjetas tokenizadas |
+| `deleteTokenizedCard()` | Elimina una tarjeta tokenizada |
+| `createRecurringPaymentLink()` | Crea un enlace de pago recurrente (suscripción) |
+| `listRecurringPaymentLinks()` | Lista los enlaces recurrentes |
+| `getRecurringPaymentLink()` | Obtiene un enlace recurrente |
+| `updateRecurringPaymentLink()` | Actualiza un enlace recurrente |
+| `deactivateRecurringPaymentLink()` | Desactiva un enlace recurrente |
+| `listRecurringSubscriptions()` | Lista los suscriptores de un enlace recurrente |
+| `getAplicativoData()` | Datos y capacidades del aplicativo |
+| `getAplicativoById()` | Datos de un aplicativo por id |
+| `getAccount()` | Datos de la cuenta |
+| `getRegions()` | Países y regiones aceptados |
+| `handleWebhook()` | Valida, normaliza y despacha los eventos del webhook |
+| `validateWebhookSignature()` | Valida la firma HMAC |
+| `validateRedirectParams()` | Valida los parámetros del redirect |
+| `isSuccessfulPayment()` | ¿El webhook describe un pago exitoso? |
+| `isRedirectApproved()` | ¿El redirect describe una transacción aprobada? |
+
+## 🛡️ Manejo de excepciones
 
 ```php
-use Rmirandasv\Wompi\Contracts\WompiClientInterface;
-use Rmirandasv\Wompi\DTOs\Requests\PaymentLinkRequestDTO;
-
-class PaymentService
-{
-    public function __construct(private WompiClientInterface $wompi)
-    {
-    }
-    
-    public function createPayment(array $data)
-    {
-        // Puedes pasar un array tradicional o usar los nuevos DTOs para mayor seguridad:
-        // $dto = PaymentLinkRequestDTO::fromArray($data);
-        return $this->wompi->createPaymentLink($data);
-    }
-}
-```
-
-## 🛡️ Manejo de Excepciones
-
-El paquete lanza excepciones específicas para diferentes escenarios:
-
-```php
-use Rmirandasv\Wompi\Exceptions\ConfigurationException;
 use Rmirandasv\Wompi\Exceptions\PaymentGatewayException;
+use Rmirandasv\Wompi\Exceptions\WompiApiException;
 use Rmirandasv\Wompi\Exceptions\WompiValidationException;
 
 try {
     $response = Wompi::createPaymentLink($data);
 } catch (WompiValidationException $e) {
-    // Los datos proporcionados en los DTOs no son válidos
-    \Log::error('Validation error: ' . $e->getMessage(), $e->getErrors());
-} catch (ConfigurationException $e) {
-    // Credenciales no configuradas correctamente
-    \Log::error('Wompi configuration error: ' . $e->getMessage());
+    // Los datos del DTO no son válidos
+    Log::error($e->getMessage(), $e->getErrors());
+} catch (WompiApiException $e) {
+    // El API de Wompi respondió con un error
+    Log::error($e->getMessage(), $e->getResponseBody());
+
+    $e->getStatusCode();     // 400, 401, 403...
+    $e->getMessages();       // el array "mensajes" de Wompi
+    $e->getServiceError();   // "servicioError"
+    $e->getErrorType();      // "subTipoError"
 } catch (PaymentGatewayException $e) {
-    // Error comunicándose con la API de Wompi (e.g. 400 Bad Request, 401 Unauthorized)
-    \Log::error('Wompi API error: ' . $e->getMessage());
-    
-    // Puedes acceder a los detalles del error devueltos por Wompi
-    $statusCode = $e->getStatusCode();
-    $wompiErrorBody = $e->getResponseBody();
+    // Fallo de red o de autenticación
+    Log::error($e->getMessage());
 }
 ```
 
-## 📚 Métodos Disponibles
+## 🔧 Inyección de dependencias
 
-| Método | Descripción |
-|--------|-------------|
-| `createPaymentLink(array\|PaymentLinkRequestDTO $data)` | Crea un enlace de pago |
-| `createTransaction3DS(array\|Transaction3DSRequestDTO $data)` | Crea una transacción con 3DS |
-| `tokenizeCard(array\|TokenizeCardRequestDTO $data)` | Tokeniza una tarjeta |
-| `getTokenizedCard(string $tokenId)` | Obtiene información de un token |
-| `deleteTokenizedCard(string $tokenId)` | Elimina un token |
-| `createRecurringCharge(array $data)` | Crea un cargo recurrente |
-| `getAplicativoData()` | Obtiene datos del aplicativo |
-| `executeTestTransaction(array $data)` | Ejecuta transacción de prueba |
-| `validateWebhookRequest(Request $request)` | Valida un webhook |
-| `validateWebhookSignature(string $body, string $hash)` | Valida firma HMAC |
-| `validateRedirectParams(array $params, string $hash)` | Valida parámetros de redirect |
-| `isSuccessfulPayment(array $webhookData)` | Verifica si es pago exitoso |
+```php
+use Rmirandasv\Wompi\Contracts\WompiClientInterface;
+
+class PaymentService
+{
+    public function __construct(private WompiClientInterface $wompi) {}
+}
+```
 
 ## 🧪 Testing
 
-Este paquete viene completamente testeado usando **[PEST PHP](https://pestphp.com)**. Incluye 31 tests que cubren todas las funcionalidades.
-
-### Ejecutar Tests
+El paquete viene testeado con [PEST PHP](https://pestphp.com). Consulta [TESTING.md](TESTING.md) para la guía completa.
 
 ```bash
-# Ejecutar todos los tests
 composer test
-
-# Ejecutar solo tests unitarios
-composer test:unit
-
-# Ejecutar solo tests de integración
-composer test:feature
-
-# Ver perfil de rendimiento
-composer test:profile
-
-# Generar reporte de cobertura
 composer test:coverage
 ```
 
-### Testing en tu Aplicación
-
-Puedes hacer mock del cliente Wompi en tus tests usando Laravel HTTP Fakes:
-
-```php
-use Illuminate\Support\Facades\Http;
-
-it('creates a payment successfully', function () {
-    Http::fake([
-        'https://id.wompi.sv/*' => Http::response([
-            'access_token' => 'test_token',
-            'expires_in' => 3600,
-        ], 200),
-        'https://api.wompi.sv/*/EnlacePago' => Http::response([
-            'id' => 'payment_123',
-            'url' => 'https://wompi.sv/pay/payment_123',
-        ], 201),
-    ]);
-
-    $result = app(WompiClient::class)->createPaymentLink([
-        'monto' => 100.00,
-        'descripcion' => 'Test',
-    ]);
-
-    expect($result)->toHaveKey('url');
-});
-```
-
-Para más ejemplos y guías completas, consulta:
-- [TESTING.md](TESTING.md) - Guía completa de testing con PEST
-- [examples/PaymentControllerTest.php](examples/PaymentControllerTest.php) - Ejemplos de tests de controladores
-
-## 📖 Documentación Oficial
-
-Para más detalles sobre los parámetros y respuestas de cada endpoint, consulta la documentación oficial:
+## 📖 Documentación oficial
 
 - [Documentación Wompi](https://docs.wompi.sv/)
+- [Swagger](https://api.wompi.sv/index.html)
 - [Crear Enlace de Pago](https://docs.wompi.sv/metodos-api/enlace-de-pago)
+- [Crear Enlace Recurrente](https://docs.wompi.sv/metodos-api/crear-enlace-pago-recurrentes)
 - [Transacciones 3DS](https://docs.wompi.sv/metodos-api/crear-transaccion-compra-3ds)
 - [Tokenización](https://docs.wompi.sv/metodos-api/tokenizacion)
-- [Cargos Recurrentes](https://docs.wompi.sv/metodos-api/cargos-recurrentes)
 - [Webhooks](https://docs.wompi.sv/webhook/definicion-webhook)
 
 ## 🤖 Integración con IA (Prompt-to-Code)
 
-Este paquete incluye una **Skill/Regla de IA** diseñada para que puedas integrar pagos en minutos usando asistentes como **Cursor, Windsurf, Claude Dev o Gemini CLI**.
+El paquete incluye una **Skill/Regla de IA** en [`laravel-wompi-skill/SKILL.md`](laravel-wompi-skill/SKILL.md) para integrar pagos en minutos con Cursor, Windsurf, Claude Code o Gemini CLI.
 
-La skill proporciona el contexto técnico necesario para que la IA genere controladores, rutas y validaciones siguiendo las mejores prácticas de seguridad de Wompi.
-
-### Cómo usar la Skill:
-1.  **Cursor/Windsurf**: Copia el archivo `laravel-wompi-skill/SKILL.md` a la carpeta `.cursor/rules/wompi.md` (o similar) en tu proyecto.
-2.  **Gemini CLI**: Importa la skill o proporciónale el archivo como contexto.
-3.  **Prompt**: Pídele a tu IA: *"Integra checkout con Wompi: enlace de pago, retorno con validación de hash y webhook usando eventos; utiliza rmirandasv/laravel-wompi >= 1.0.1"*.
-
-Encuentra la guía detallada en [laravel-wompi-skill/SKILL.md](laravel-wompi-skill/SKILL.md).
+```bash
+# Cursor / Windsurf
+cp laravel-wompi-skill/SKILL.md .cursor/rules/wompi.md
+```
 
 ## 🤝 Contribuciones
 
 Las contribuciones son bienvenidas. Por favor:
 
-1. Fork el proyecto
+1. Fork del proyecto
 2. Crea una rama para tu feature (`git checkout -b feature/AmazingFeature`)
-3. Commit tus cambios (`git commit -m 'Add some AmazingFeature'`)
+3. Commit de tus cambios (`git commit -m 'Add some AmazingFeature'`)
 4. Push a la rama (`git push origin feature/AmazingFeature`)
 5. Abre un Pull Request
 
@@ -526,17 +472,6 @@ Las contribuciones son bienvenidas. Por favor:
 
 Este paquete es software de código abierto licenciado bajo la [Licencia MIT](LICENSE).
 
-## 👨‍💻 Autor
-
-**Ronald Miranda**
-- GitHub: [@rmirandasv](https://github.com/rmirandasv)
-
-## 🙏 Agradecimientos
-
-- [Wompi](https://wompi.sv) por su API de pagos
-- La comunidad de Laravel
-
 ---
 
-**⚠️ Nota de Seguridad**: Nunca compartas tus credenciales de Wompi. Mantenlas seguras en variables de entorno y nunca las commits a control de versiones.
-
+**⚠️ Nota de Seguridad**: Nunca compartas tus credenciales de Wompi. Mantenlas en variables de entorno y nunca las commitees a control de versiones.

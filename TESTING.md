@@ -1,6 +1,6 @@
 # Testing con PEST - Laravel Wompi
 
-Esta guía explica cómo probar el paquete Laravel Wompi utilizando PEST con mocks.
+Esta guía explica cómo probar el paquete Laravel Wompi (v2) con PEST y `Http::fake()`.
 
 ## Instalación
 
@@ -8,380 +8,236 @@ El paquete ya incluye PEST como dependencia de desarrollo. Si necesitas instalar
 
 ```bash
 composer require pestphp/pest --dev --with-all-dependencies
-composer require orchestra/testbench --dev
-composer require mockery/mockery --dev
-./vendor/bin/pest --init
 ```
 
-## Ejecutar Tests
+## Comandos
 
 ```bash
-# Ejecutar todos los tests
-./vendor/bin/pest
-
-# Ejecutar tests específicos
-./vendor/bin/pest tests/Unit/WompiClientAuthenticationTest.php
-
-# Ejecutar con coverage
-./vendor/bin/pest --coverage
-
-# Ejecutar en modo verboso
-./vendor/bin/pest --verbose
+composer test              # toda la suite
+composer test:unit         # solo tests/Unit
+composer test:feature      # solo tests/Feature
+composer test:coverage     # reporte de cobertura
+composer test:profile      # perfil de rendimiento
 ```
 
-## Estructura de Tests
+## ⚠️ Regla fundamental: la suite es offline
 
-```
-tests/
-├── Pest.php                              # Configuración de PEST
-├── TestCase.php                          # TestCase base con Orchestra Testbench
-├── Unit/
-│   ├── WompiClientAuthenticationTest.php # Tests de autenticación
-│   ├── WompiClientApiTest.php           # Tests de llamadas API
-│   ├── WompiClientWebhookTest.php       # Tests de webhooks
-│   └── WompiClientRedirectTest.php      # Tests de validación de redirect
-└── Feature/
-    └── PaymentFlowTest.php              # Tests de flujos completos
-```
+`tests/TestCase.php` activa `Http::preventStrayRequests()`. Si un `Http::fake()` **no coincide** con la petición, Laravel no devuelve una respuesta simulada: **realiza la llamada real** contra `api.wompi.sv`.
 
-## Mocking con PEST
+Para evitarlo hay dos reglas:
 
-### 1. Mock de HTTP Requests (Facade Http)
+1. Usa comodines en los patrones que pueden llevar query string:
 
-PEST utiliza los facades de Laravel para hacer mocks de HTTP requests:
+   ```php
+   Http::fake([
+       // Mal: la URL real es https://api.wompi.sv/Tokenizacion?Pagina=1&CantidadPagina=50
+       'https://api.wompi.sv/Tokenizacion' => Http::response([...]),
+
+       // Bien:
+       'https://api.wompi.sv/Tokenizacion*' => Http::response([...]),
+   ]);
+   ```
+
+2. En tus propias pruebas, llama a `Http::preventStrayRequests()` en el `setUp()`.
+
+Con la protección activada, una petición sin fake lanza `StrayRequestException` en vez de salir a internet.
+
+## Anatomía de un test
 
 ```php
 use Illuminate\Support\Facades\Http;
+use Rmirandasv\Wompi\Facades\Wompi;
 
-it('can create a payment link', function () {
-    // Mock de las respuestas HTTP
+it('creates a payment link', function () {
     Http::fake([
-        'https://id.wompi.sv/test' => Http::response([
+        'https://id.wompi.sv/connect/token' => Http::response([
             'access_token' => 'test_token',
             'expires_in' => 3600,
         ], 200),
-        'https://api.wompi.sv/v1/test/EnlacePago' => Http::response([
-            'id' => 'link_123',
-            'url' => 'https://wompi.sv/pay/link_123',
-        ], 201),
+        'https://api.wompi.sv/EnlacePago' => Http::response([
+            'idEnlace' => 1384854,
+            'urlEnlace' => 'https://wompi.sv/pay/1384854',
+            'estaProductivo' => true,
+        ], 200),
     ]);
 
-    $client = app(WompiClient::class);
-    $result = $client->createPaymentLink([
+    $response = Wompi::createPaymentLink([
+        'identificadorEnlaceComercio' => 'ORDER-1',
+        'nombreProducto' => 'Test',
         'monto' => 100.00,
-        'descripcion' => 'Test Payment',
     ]);
 
-    // Assertions
-    expect($result)
-        ->toHaveKey('id')
-        ->and($result['id'])->toBe('link_123');
+    expect($response->idEnlace)->toBe(1384854);
 
-    // Verificar que se hizo la llamada correcta
     Http::assertSent(function ($request) {
-        return str_contains($request->url(), '/EnlacePago') &&
-               $request['monto'] === 100.00;
+        return str_contains($request->url(), '/EnlacePago')
+            && $request['monto'] === 100.00
+            && $request->identificadorEnlaceComercio === 'ORDER-1';
     });
 });
 ```
 
-### 2. Mock de Cache
+## Probar el webhook
+
+El webhook de Wompi llega en **PascalCase**. Calcula la firma con el `client_secret`:
 
 ```php
-use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Event;
+use Rmirandasv\Wompi\Events\WompiPaymentProcessed;
 
-beforeEach(function () {
-    Cache::flush(); // Limpiar cache antes de cada test
-});
+it('processes a successful payment', function () {
+    Event::fake();
 
-it('caches access token', function () {
-    Http::fake([
-        'https://id.wompi.sv/test' => Http::response([
-            'access_token' => 'cached_token',
-            'expires_in' => 3600,
-        ], 200),
-        '*' => Http::response(['data' => 'test'], 200),
-    ]);
-
-    $client = app(WompiClient::class);
-    
-    // Primera llamada - debe autenticar
-    $client->getAplicativoData();
-    
-    // Segunda llamada - usa token cacheado
-    $client->getAplicativoData();
-
-    // Verificar que la autenticación solo se llamó una vez
-    Http::assertSent(function ($request) {
-        return $request->url() === 'https://id.wompi.sv/test';
-    }, 1);
-});
-```
-
-### 3. Mock de Requests (Webhooks)
-
-```php
-use Illuminate\Http\Request;
-
-it('validates webhook request', function () {
-    $webhookPayload = [
-        'idTransaccion' => 'txn_123',
-        'monto' => 100.00,
-        'resultadoTransaccion' => 'ExitosaAprobada',
+    $payload = [
+        'IdTransaccion' => 'txn_123',
+        'Monto' => 250.00,
+        'ResultadoTransaccion' => 'ExitosaAprobada',
+        'CodigoAutorizacion' => 'AUTH123',
+        'EsProductiva' => true,
+        'EnlacePago' => [
+            'Id' => 66,
+            'IdentificadorEnlaceComercio' => 'ORDER-123',
+        ],
     ];
 
-    $webhookBody = json_encode($webhookPayload);
-    $wompiHash = hash_hmac('sha256', $webhookBody, 'test_client_secret');
+    $body = json_encode($payload);
+    $hash = hash_hmac('sha256', $body, config('wompi.client_secret'));
 
-    // Crear un Request mock
-    $request = Request::create(
-        '/webhook',
-        'POST',
-        [],
-        [],
-        [],
-        ['HTTP_WOMPI_HASH' => $wompiHash],
-        $webhookBody
-    );
+    $response = $this->postJson('/webhooks/wompi', $payload, ['wompi_hash' => $hash]);
 
-    $client = app(WompiClient::class);
-    $result = $client->validateWebhookRequest($request);
+    $response->assertStatus(200);
 
-    expect($result)
-        ->toBeArray()
-        ->toHaveKey('idTransaccion');
+    Event::assertDispatched(WompiPaymentProcessed::class, function ($event) {
+        return $event->isSuccessful === true
+            && $event->webhook->reference() === 'ORDER-123';
+    });
 });
 ```
 
-### 4. Usar Http::sequence() para Múltiples Respuestas
+### Una transacción de prueba nunca marca una orden como pagada
 
 ```php
-it('handles multiple API calls', function () {
+it('never marks a test transaction as paid', function () {
+    Event::fake();
+
+    $payload = [
+        'IdTransaccion' => 'txn_test',
+        'ResultadoTransaccion' => 'ExitosaAprobada',
+        'EsProductiva' => false,   // fue una prueba, no se cobró
+    ];
+
+    $body = json_encode($payload);
+    $hash = hash_hmac('sha256', $body, config('wompi.client_secret'));
+
+    $this->postJson('/webhooks/wompi', $payload, ['wompi_hash' => $hash])
+        ->assertStatus(200);
+
+    Event::assertDispatched(WompiPaymentProcessed::class, fn ($event) => $event->isSuccessful === false);
+});
+```
+
+## Probar el redirect
+
+```php
+it('validates the redirect signature', function () {
+    $params = [
+        'idTransaccion' => 'txn_123',
+        'monto' => '100.00',
+        'esReal' => 'True',
+        'formaPago' => 'TarjetaCreditoDebito',
+        'esAprobada' => 'True',
+        'codigoAutorizacion' => 'AUTH789',
+        'mensaje' => 'Transaccion Aprobada',
+    ];
+
+    $hash = hash_hmac('sha256', implode('', array_values($params)), config('wompi.client_secret'));
+
+    $response = $this->get('/payments/callback?'.http_build_query($params).'&hash='.$hash);
+
+    $response->assertStatus(200);
+});
+```
+
+## Probar errores del API
+
+Wompi responde con la forma `ApiErrorResult`:
+
+```php
+use Rmirandasv\Wompi\Exceptions\WompiApiException;
+
+it('maps the api errors', function () {
     Http::fake([
-        'https://api.wompi.sv/v1/test/Tokenizacion/tok_123' => Http::sequence()
-            ->push(['tokenId' => 'tok_123', 'status' => 'active'], 200)
-            ->push(['success' => true, 'message' => 'Deleted'], 200),
-    ]);
-
-    $client = app(WompiClient::class);
-    
-    // Primera llamada - devuelve el token
-    $token = $client->getTokenizedCard('tok_123');
-    expect($token['status'])->toBe('active');
-    
-    // Segunda llamada - devuelve confirmación de eliminación
-    $result = $client->deleteTokenizedCard('tok_123');
-    expect($result['success'])->toBeTrue();
-});
-```
-
-## Ejemplos de Assertions con PEST
-
-### Expectations Básicas
-
-```php
-// Valores
-expect($value)->toBe(100);
-expect($value)->toEqual(100.00); // Comparación flexible
-expect($value)->toBeTrue();
-expect($value)->toBeFalse();
-expect($value)->toBeNull();
-
-// Arrays
-expect($array)->toBeArray();
-expect($array)->toHaveKey('id');
-expect($array)->toHaveKeys(['id', 'name']);
-expect($array)->toHaveCount(5);
-
-// Strings
-expect($string)->toBeString();
-expect($string)->toContain('test');
-expect($string)->toStartWith('http');
-expect($string)->toEndWith('.com');
-
-// Números
-expect($number)->toBeGreaterThan(10);
-expect($number)->toBeLessThan(100);
-expect($number)->toBeBetween(10, 100);
-```
-
-### Expectations Encadenadas
-
-```php
-expect($result)
-    ->toBeArray()
-    ->toHaveKey('id')
-    ->and($result['id'])->toBe('txn_123')
-    ->and($result['amount'])->toBeGreaterThan(0);
-```
-
-### Excepciones
-
-```php
-it('throws exception when credentials are missing', function () {
-    new WompiClient(null, 'https://api.test', 'client_id', 'secret');
-})->throws(ConfigurationException::class, 'Wompi credentials are not set');
-```
-
-## Hooks de PEST
-
-### beforeEach / afterEach
-
-```php
-describe('WompiClient Tests', function () {
-    beforeEach(function () {
-        Cache::flush();
-        // Setup que se ejecuta antes de cada test
-    });
-
-    afterEach(function () {
-        // Cleanup que se ejecuta después de cada test
-    });
-
-    it('does something', function () {
-        // Test code
-    });
-});
-```
-
-## Verificaciones de HTTP
-
-```php
-// Verificar que se envió una request
-Http::assertSent(function ($request) {
-    return $request->url() === 'https://api.example.com' &&
-           $request->hasHeader('Authorization');
-});
-
-// Verificar cantidad de requests
-Http::assertSentCount(3);
-
-// Verificar que NO se envió una request
-Http::assertNotSent(function ($request) {
-    return str_contains($request->url(), '/forbidden');
-});
-
-// Verificar que no se enviaron requests
-Http::assertNothingSent();
-```
-
-## Estructura de un Test
-
-```php
-<?php
-
-use Illuminate\Support\Facades\Http;
-use Rmirandasv\Wompi\WompiClient;
-
-describe('Feature Name', function () {
-    
-    beforeEach(function () {
-        // Setup común para todos los tests
-    });
-
-    it('does something specific', function () {
-        // Arrange: Preparar el escenario
-        Http::fake([
-            '*' => Http::response(['success' => true], 200),
-        ]);
-
-        // Act: Ejecutar la acción
-        $client = app(WompiClient::class);
-        $result = $client->someMethod();
-
-        // Assert: Verificar el resultado
-        expect($result)->toBeArray();
-    });
-
-    it('handles errors correctly', function () {
-        // Test de manejo de errores
-    })->throws(ExceptionClass::class);
-});
-```
-
-## Best Practices
-
-1. **Un test, una cosa**: Cada test debe verificar un comportamiento específico
-2. **Nombres descriptivos**: Usa `it('should do something')` o `it('does something')`
-3. **Arrange-Act-Assert**: Organiza tu código en estas tres secciones
-4. **Limpia el estado**: Usa `beforeEach()` para resetear estado compartido
-5. **Mock solo lo necesario**: No mockees todo, solo las dependencias externas
-6. **Tests independientes**: Cada test debe poder ejecutarse solo
-
-## Testing de Webhooks
-
-```php
-it('validates webhook signature', function () {
-    $client = app(WompiClient::class);
-    
-    $body = json_encode(['id' => 'txn_123']);
-    $hash = hash_hmac('sha256', $body, 'test_client_secret');
-    
-    $isValid = $client->validateWebhookSignature($body, $hash);
-    
-    expect($isValid)->toBeTrue();
-});
-```
-
-## Testing de Flujos Completos
-
-```php
-it('can complete payment flow', function () {
-    Http::fake([
-        'https://id.wompi.sv/test' => Http::response([
-            'access_token' => 'token',
+        'https://id.wompi.sv/connect/token' => Http::response([
+            'access_token' => 'test_token',
             'expires_in' => 3600,
         ], 200),
-        'https://api.wompi.sv/v1/test/EnlacePago' => Http::response([
-            'id' => 'link_123',
-            'url' => 'https://wompi.sv/pay/link_123',
-        ], 201),
+        'https://api.wompi.sv/EnlacePago' => Http::response([
+            'servicioError' => 'EnlacePago',
+            'subTipoError' => 'DATOS_INVALIDOS',
+            'mensajes' => ['El monto debe ser mayor a 0'],
+        ], 400),
     ]);
 
-    $client = app(WompiClient::class);
-    
-    // Crear link de pago
-    $link = $client->createPaymentLink([
-        'monto' => 100.00,
-        'descripcion' => 'Test',
-    ]);
-    
-    expect($link)->toHaveKey('url');
-    
-    // Verificar el flujo
-    Http::assertSent(function ($request) {
-        return str_contains($request->url(), '/EnlacePago');
-    });
+    try {
+        Wompi::createPaymentLink(['identificadorEnlaceComercio' => 'ORDER-1', 'nombreProducto' => 'Test']);
+    } catch (WompiApiException $e) {
+        expect($e->getStatusCode())->toBe(400)
+            ->and($e->getMessages())->toBe(['El monto debe ser mayor a 0'])
+            ->and($e->getServiceError())->toBe('EnlacePago');
+    }
 });
 ```
 
-## Recursos Adicionales
+## El test de contrato contra el spec de Wompi
 
-- [Documentación de PEST](https://pestphp.com)
-- [Orchestra Testbench](https://packages.tools/testbench)
-- [Laravel HTTP Tests](https://laravel.com/docs/http-tests)
-- [Mockery Documentation](http://docs.mockery.io)
+`tests/Fixtures/wompi-swagger.json` es una copia recortada de la especificación OpenAPI de Wompi (`https://api.wompi.sv/swagger/v1/swagger.json`).
 
-## Comandos Útiles
+`tests/Unit/WompiEndpointContractTest.php` verifica **dos cosas** para cada método del cliente:
+
+1. Que el cliente llama a ese verbo y esa ruta.
+2. Que Wompi documenta ese verbo y esa ruta.
+
+La segunda comprobación es la que evita la clase de bug que rompió la v1: un endpoint renombrado o eliminado falla en CI en lugar de devolver un 404 en producción.
+
+El workflow **"Refresh Wompi spec"** (`.github/workflows/wompi-spec.yml`) corre cada semana, descarga el spec vigente y falla si cambió, adjuntando la nueva versión como artefacto.
+
+Para actualizar el fixture a mano:
 
 ```bash
-# Ejecutar solo tests de Unit
-./vendor/bin/pest tests/Unit
-
-# Ejecutar solo tests de Feature
-./vendor/bin/pest tests/Feature
-
-# Ejecutar con filtro
-./vendor/bin/pest --filter="authentication"
-
-# Ver tests disponibles sin ejecutarlos
-./vendor/bin/pest --list-tests
-
-# Ejecutar en modo parallel (más rápido)
-./vendor/bin/pest --parallel
-
-# Generar reporte de coverage en HTML
-./vendor/bin/pest --coverage --coverage-html=coverage
+curl -fsSL https://api.wompi.sv/swagger/v1/swagger.json | jq '{
+  openapi: .openapi,
+  info: {"title": .info.title, "version": .info.version},
+  "x-source": "https://api.wompi.sv/swagger/v1/swagger.json",
+  "x-fetched-at": "'$(date -u +%Y-%m-%d)'",
+  paths: (.paths | with_entries(.value |= with_entries(.value |= {
+    summary: (.summary // null),
+    parameters: ((.parameters // []) | map({name, in, required}))
+  })))
+}' > tests/Fixtures/wompi-swagger.json
 ```
 
-Si este documento fue util para ti, deja una estrella en el repositorio!
+## Probar que no se filtran datos de tarjeta
+
+```php
+it('never logs the card number', function () {
+    // Usa un logger que grabe en memoria (ver tests/Unit/LoggingSecurityTest.php)
+    // y comprueba que el PAN no aparece en ningún log.
+});
+```
+
+La suite del paquete ya cubre esto en `tests/Unit/LoggingSecurityTest.php` y `tests/Unit/SensitiveDataMaskerTest.php`.
+
+## Mockear el cliente completo
+
+```php
+$mock = Mockery::mock(\Rmirandasv\Wompi\Contracts\WompiClientInterface::class);
+$mock->shouldReceive('createPaymentLink')->andReturn(
+    new \Rmirandasv\Wompi\DTOs\Responses\PaymentLinkResponseDTO(['idEnlace' => 1])
+);
+
+$this->app->instance(\Rmirandasv\Wompi\Contracts\WompiClientInterface::class, $mock);
+```
+
+## Ejemplos completos
+
+Consulta [examples/PaymentControllerTest.php](examples/PaymentControllerTest.php) para ejemplos de controladores, webhooks, suscripciones y manejo de errores.

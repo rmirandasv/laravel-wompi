@@ -2,33 +2,35 @@
 
 /**
  * EJEMPLO: Cómo probar un Controller que usa el paquete Wompi
- * 
+ *
  * Este archivo muestra cómo integrar el paquete Wompi en tu aplicación
- * Laravel y cómo escribir tests para tus controladores que lo utilizan.
+ * Laravel y cómo escribir tests para sus controladores.
+ *
+ * Nota: los ejemplos usan el contrato de la v2 del paquete. Consulta
+ * UPGRADE.md para el mapeo desde la v1.
  */
 
 namespace Tests\Feature;
 
 use Illuminate\Support\Facades\Http;
-use Rmirandasv\Wompi\WompiClient;
+use Rmirandasv\Wompi\Events\WompiPaymentProcessed;
 use Rmirandasv\Wompi\Exceptions\PaymentGatewayException;
 
 describe('Payment Controller', function () {
 
     // Ejemplo 1: Test de creación de enlace de pago
     it('creates payment link successfully', function () {
-        // Mock de las respuestas de Wompi
         Http::fake([
-            'https://id.wompi.sv/*' => Http::response([
+            'https://id.wompi.sv/connect/token' => Http::response([
                 'access_token' => 'mock_token',
                 'expires_in' => 3600,
             ], 200),
-            'https://api.wompi.sv/*/EnlacePago' => Http::response([
-                'id' => 'payment_123',
-                'url' => 'https://wompi.sv/pay/payment_123',
-                'monto' => 100.00,
-                'descripcion' => 'Compra de producto',
-            ], 201),
+            'https://api.wompi.sv/EnlacePago' => Http::response([
+                'idEnlace' => 1384854,
+                'urlEnlace' => 'https://wompi.sv/pay/1384854',
+                'urlQrCodeEnlace' => 'https://wompi.sv/qr/1384854',
+                'estaProductivo' => true,
+            ], 200),
         ]);
 
         // Simular request POST a tu controlador
@@ -51,23 +53,31 @@ describe('Payment Controller', function () {
 
         // Verificar que se llamó a Wompi correctamente
         Http::assertSent(function ($request) {
-            return str_contains($request->url(), '/EnlacePago') &&
-                   $request['monto'] === 100.00;
+            return str_contains($request->url(), '/EnlacePago')
+                && $request['monto'] === 100.00
+                && $request['identificadorEnlaceComercio'] === 'ORDER-123';
         });
     });
 
     // Ejemplo 2: Test de webhook handling
     it('processes successful payment webhook', function () {
+        // El webhook real de Wompi viene en PascalCase.
         $webhookData = [
-            'idTransaccion' => 'txn_webhook_123',
-            'monto' => 250.00,
-            'resultadoTransaccion' => 'ExitosaAprobada',
-            'codigoAutorizacion' => 'AUTH123',
-            'formaPago' => 'VISA',
+            'IdTransaccion' => 'txn_webhook_123',
+            'Monto' => 250.00,
+            'ResultadoTransaccion' => 'ExitosaAprobada',
+            'CodigoAutorizacion' => 'AUTH123',
+            'FormaPagoUtilizada' => 'TarjetaCreditoDebito',
+            'EsProductiva' => true,
+            'EnlacePago' => [
+                'Id' => 66,
+                'IdentificadorEnlaceComercio' => 'ORDER-123',
+                'NombreProducto' => 'Compra de producto',
+            ],
         ];
 
         $webhookBody = json_encode($webhookData);
-        
+
         // Calcular el hash como lo haría Wompi
         $wompiHash = hash_hmac('sha256', $webhookBody, config('wompi.client_secret'));
 
@@ -89,8 +99,8 @@ describe('Payment Controller', function () {
     // Ejemplo 3: Test de webhook con firma inválida
     it('rejects webhook with invalid signature', function () {
         $webhookData = [
-            'idTransaccion' => 'txn_fake',
-            'monto' => 999.99,
+            'IdTransaccion' => 'txn_fake',
+            'Monto' => 999.99,
         ];
 
         // Enviar con hash inválido
@@ -98,10 +108,8 @@ describe('Payment Controller', function () {
             'wompi_hash' => 'invalid_signature',
         ]);
 
-        $response->assertStatus(400)
-            ->assertJson([
-                'error' => 'Invalid signature',
-            ]);
+        // El middleware responde 403: nunca 200, para no ocultar un ataque.
+        $response->assertStatus(403);
 
         // Verificar que NO se actualizó la base de datos
         $this->assertDatabaseMissing('orders', [
@@ -112,22 +120,21 @@ describe('Payment Controller', function () {
     // Ejemplo 4: Test de tokenización de tarjeta
     it('tokenizes credit card for subscription', function () {
         Http::fake([
-            'https://id.wompi.sv/*' => Http::response([
+            'https://id.wompi.sv/connect/token' => Http::response([
                 'access_token' => 'mock_token',
                 'expires_in' => 3600,
             ], 200),
-            'https://api.wompi.sv/*/Tokenizacion' => Http::response([
-                'tokenId' => 'tok_customer_456',
-                'ultimos4Digitos' => '4242',
-                'tipoTarjeta' => 'VISA',
-            ], 201),
+            'https://api.wompi.sv/Tokenizacion' => Http::response([
+                'token' => 'tok_customer_456',
+                'tarjetaEnmascarada' => '424242******4242',
+            ], 200),
         ]);
 
         $response = $this->postJson('/api/subscriptions/card', [
             'card_number' => '4242424242424242',
             'cvv' => '123',
-            'exp_month' => '12',
-            'exp_year' => '25',
+            'exp_month' => 12,
+            'exp_year' => 2030,
             'card_holder' => 'Juan Perez',
         ]);
 
@@ -140,53 +147,51 @@ describe('Payment Controller', function () {
         $this->assertDatabaseHas('payment_methods', [
             'token_id' => 'tok_customer_456',
             'last_four' => '4242',
-            'card_type' => 'VISA',
         ]);
     });
 
-    // Ejemplo 5: Test de cargo recurrente
-    it('processes recurring charge for subscription', function () {
-        // Crear método de pago tokenizado en la base de datos
-        $paymentMethod = PaymentMethod::factory()->create([
-            'token_id' => 'tok_existing_789',
-            'last_four' => '4242',
-        ]);
-
+    // Ejemplo 5: Test del enlace de pago recurrente (suscripción)
+    it('creates a recurring payment link for a subscription', function () {
         Http::fake([
-            'https://id.wompi.sv/*' => Http::response([
+            'https://id.wompi.sv/connect/token' => Http::response([
                 'access_token' => 'mock_token',
                 'expires_in' => 3600,
             ], 200),
-            'https://api.wompi.sv/*/CargoRecurrente' => Http::response([
-                'idTransaccion' => 'recurring_txn_001',
-                'estado' => 'Aprobada',
-                'monto' => 29.99,
-                'codigoAutorizacion' => 'AUTH_REC_456',
-            ], 201),
+            'https://api.wompi.sv/EnlacePagoRecurrente' => Http::response([
+                'idEnlace' => 'rec-1',
+                'urlEnlace' => 'https://wompi.sv/s/rec-1',
+                'urlQrCodeEnlace' => 'https://wompi.sv/qr/rec-1',
+                'estaProductivo' => true,
+            ], 200),
         ]);
 
-        // Ejecutar comando de cargo recurrente
-        $this->artisan('subscriptions:charge')
-            ->assertSuccessful();
-
-        // Verificar que se creó el registro de pago
-        $this->assertDatabaseHas('subscription_payments', [
-            'transaction_id' => 'recurring_txn_001',
-            'status' => 'approved',
+        $response = $this->postJson('/api/subscriptions', [
+            'day_of_payment' => 5,
+            'name' => 'Plan mensual',
             'amount' => 29.99,
         ]);
+
+        $response->assertStatus(201)
+            ->assertJsonPath('data.id', 'rec-1');
+
+        Http::assertSent(function ($request) {
+            return str_contains($request->url(), '/EnlacePagoRecurrente')
+                && $request['diaDePago'] === 5
+                && $request['monto'] === 29.99;
+        });
     });
 
     // Ejemplo 6: Test de manejo de errores
     it('handles payment gateway errors gracefully', function () {
         Http::fake([
-            'https://id.wompi.sv/*' => Http::response([
+            'https://id.wompi.sv/connect/token' => Http::response([
                 'access_token' => 'mock_token',
                 'expires_in' => 3600,
             ], 200),
-            'https://api.wompi.sv/*/EnlacePago' => Http::response([
-                'error' => 'invalid_amount',
-                'message' => 'El monto debe ser mayor a 0',
+            'https://api.wompi.sv/EnlacePago' => Http::response([
+                'servicioError' => 'EnlacePago',
+                'subTipoError' => 'DATOS_INVALIDOS',
+                'mensajes' => ['El monto debe ser mayor a 0'],
             ], 400),
         ]);
 
@@ -206,9 +211,9 @@ describe('Payment Controller', function () {
         $redirectParams = [
             'idTransaccion' => 'txn_redirect_123',
             'monto' => '100.00',
-            'esReal' => '1',
-            'formaPago' => 'VISA',
-            'esAprobada' => '1',
+            'esReal' => 'True',
+            'formaPago' => 'TarjetaCreditoDebito',
+            'esAprobada' => 'True',
             'codigoAutorizacion' => 'AUTH789',
             'mensaje' => 'Transaccion Aprobada',
         ];
@@ -218,7 +223,7 @@ describe('Payment Controller', function () {
         $hash = hash_hmac('sha256', $concatenated, config('wompi.client_secret'));
 
         // Simular redirect GET
-        $response = $this->get('/payments/callback?' . http_build_query($redirectParams) . '&hash=' . $hash);
+        $response = $this->get('/payments/callback?'.http_build_query($redirectParams).'&hash='.$hash);
 
         $response->assertStatus(200)
             ->assertViewIs('payments.success')
@@ -227,17 +232,16 @@ describe('Payment Controller', function () {
 
     // Ejemplo 8: Test con Mock del WompiClient completo
     it('can mock the entire WompiClient service', function () {
-        // Mock completo del servicio
-        $mockClient = Mockery::mock(WompiClient::class);
+        $mockClient = \Mockery::mock(\Rmirandasv\Wompi\Contracts\WompiClientInterface::class);
         $mockClient->shouldReceive('createPaymentLink')
             ->once()
-            ->with(Mockery::type('array'))
-            ->andReturn([
-                'id' => 'mocked_link_123',
-                'url' => 'https://mocked.wompi.sv/pay',
-            ]);
+            ->with(\Mockery::type('array'))
+            ->andReturn(new \Rmirandasv\Wompi\DTOs\Responses\PaymentLinkResponseDTO([
+                'idEnlace' => 1384854,
+                'urlEnlace' => 'https://mocked.wompi.sv/pay',
+            ]));
 
-        $this->app->instance(WompiClient::class, $mockClient);
+        $this->app->instance(\Rmirandasv\Wompi\Contracts\WompiClientInterface::class, $mockClient);
 
         // Usar el servicio mockeado
         $response = $this->postJson('/api/payments/create', [
@@ -247,11 +251,45 @@ describe('Payment Controller', function () {
 
         $response->assertStatus(201);
     });
+
+    // Ejemplo 9: Test del evento con una transacción de prueba
+    it('never marks a test transaction as paid', function () {
+        Illuminate\Support\Facades\Event::fake();
+
+        $webhookData = [
+            'IdTransaccion' => 'txn_test_123',
+            'Monto' => 250.00,
+            'ResultadoTransaccion' => 'ExitosaAprobada',
+            // EsProductiva false => fue una transacción de prueba, no se cobró.
+            'EsProductiva' => false,
+            'EnlacePago' => [
+                'IdentificadorEnlaceComercio' => 'ORDER-123',
+            ],
+        ];
+
+        $webhookBody = json_encode($webhookData);
+        $wompiHash = hash_hmac('sha256', $webhookBody, config('wompi.client_secret'));
+
+        $this->postJson('/api/webhooks/wompi', $webhookData, [
+            'wompi_hash' => $wompiHash,
+        ])->assertStatus(200);
+
+        Illuminate\Support\Facades\Event::assertDispatched(
+            WompiPaymentProcessed::class,
+            fn ($event) => $event->isSuccessful === false
+                && $event->webhook->isTestTransaction() === true
+        );
+
+        $this->assertDatabaseMissing('orders', [
+            'transaction_id' => 'txn_test_123',
+            'status' => 'paid',
+        ]);
+    });
 });
 
 /**
  * EJEMPLO DE CONTROLLER
- * 
+ *
  * Aquí está el controlador que se está probando arriba:
  */
 
@@ -259,13 +297,14 @@ describe('Payment Controller', function () {
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
-use Rmirandasv\Wompi\WompiClient;
+use Rmirandasv\Wompi\Contracts\WompiClientInterface;
 use Rmirandasv\Wompi\Exceptions\PaymentGatewayException;
+use Rmirandasv\Wompi\Facades\Wompi;
 
 class PaymentController extends Controller
 {
     public function __construct(
-        private WompiClient $wompi
+        private WompiClientInterface $wompi
     ) {}
 
     public function createPayment(Request $request)
@@ -279,14 +318,17 @@ class PaymentController extends Controller
         try {
             $paymentLink = $this->wompi->createPaymentLink([
                 'monto' => $validated['amount'],
-                'descripcion' => $validated['description'],
-                'urlRedirect' => route('payments.callback'),
-                'urlWebhook' => route('webhooks.wompi'),
+                'identificadorEnlaceComercio' => 'ORDER-123',
+                'nombreProducto' => $validated['description'],
+                'configuracion' => [
+                    'urlRedirect' => route('payments.callback'),
+                    'urlWebhook' => route('wompi.webhook'),
+                ],
             ]);
 
             // Guardar en base de datos
             $order = Order::create([
-                'payment_id' => $paymentLink['id'],
+                'payment_id' => $paymentLink->idEnlace,
                 'amount' => $validated['amount'],
                 'status' => 'pending',
             ]);
@@ -294,8 +336,8 @@ class PaymentController extends Controller
             return response()->json([
                 'success' => true,
                 'data' => [
-                    'payment_link' => $paymentLink['url'],
-                    'payment_id' => $paymentLink['id'],
+                    'payment_link' => $paymentLink->urlEnlace,
+                    'payment_id' => $paymentLink->idEnlace,
                 ],
             ], 201);
 
@@ -307,38 +349,15 @@ class PaymentController extends Controller
         }
     }
 
-    public function handleWebhook(Request $request)
-    {
-        try {
-            $data = $this->wompi->validateWebhookRequest($request);
-            
-            if ($this->wompi->isSuccessfulPayment($data)) {
-                Order::where('transaction_id', $data['idTransaccion'])
-                    ->update([
-                        'status' => 'paid',
-                        'authorization_code' => $data['codigoAutorizacion'] ?? null,
-                    ]);
-            }
-
-            return response()->json(['success' => true]);
-
-        } catch (PaymentGatewayException $e) {
-            return response()->json([
-                'error' => 'Invalid signature',
-            ], 400);
-        }
-    }
-
     public function handleCallback(Request $request)
     {
-        $params = $request->except('hash');
-        $hash = $request->get('hash');
+        $params = $request->query();
 
-        if (!$this->wompi->validateRedirectParams($params, $hash)) {
-            abort(400, 'Invalid signature');
+        if (! $this->wompi->validateRedirectParams($params, (string) $request->input('hash'))) {
+            abort(403, 'Invalid signature');
         }
 
-        if ($params['esAprobada'] === '1') {
+        if ($this->wompi->isRedirectApproved($params)) {
             return view('payments.success', [
                 'transaction_id' => $params['idTransaccion'],
                 'amount' => $params['monto'],
@@ -351,4 +370,3 @@ class PaymentController extends Controller
     }
 }
 */
-
