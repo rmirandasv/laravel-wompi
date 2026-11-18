@@ -2,23 +2,24 @@
 
 namespace Rmirandasv\Wompi\Events;
 
-use Illuminate\Foundation\Events\Dispatchable;
-use Illuminate\Queue\SerializesModels;
+use Rmirandasv\Wompi\Webhooks\WompiWebhook;
 
+/**
+ * Dispatched every time a Wompi webhook is received and validated.
+ *
+ * The "isSuccessful" flag is true only when the transaction was approved
+ * *and* it was a real charge. A test transaction was never billed to the
+ * customer, so it must never mark an order as paid.
+ */
 class WompiPaymentProcessed
 {
-    use Dispatchable, SerializesModels;
-
     /**
-     * @var array<string, mixed>
+     * @param  array<array-key, mixed>  $payload  The raw payload as sent by Wompi.
      */
-    public array $payload;
-
-    public bool $isSuccessful;
-
-    public function __construct(array $payload, bool $isSuccessful)
-    {
-        $this->payload = $payload;
-        $this->isSuccessful = $isSuccessful;
+    public function __construct(
+        public readonly array $payload,
+        public readonly bool $isSuccessful,
+        public readonly WompiWebhook $webhook,
+    ) {
     }
 }

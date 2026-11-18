@@ -2,20 +2,19 @@
 
 namespace Rmirandasv\Wompi\Events;
 
-use Illuminate\Foundation\Events\Dispatchable;
-use Illuminate\Queue\SerializesModels;
+use Rmirandasv\Wompi\Webhooks\WompiWebhook;
 
+/**
+ * Dispatched every time a Wompi webhook is received and validated.
+ */
 class WompiWebhookReceived
 {
-    use Dispatchable, SerializesModels;
-
     /**
-     * @var array<string, mixed>
+     * @param  array<array-key, mixed>  $payload  The raw payload as sent by Wompi.
      */
-    public array $payload;
-
-    public function __construct(array $payload)
-    {
-        $this->payload = $payload;
+    public function __construct(
+        public readonly array $payload,
+        public readonly WompiWebhook $webhook,
+    ) {
     }
 }
