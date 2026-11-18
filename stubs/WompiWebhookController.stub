@@ -1,0 +1,35 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Rmirandasv\Wompi\Facades\Wompi;
+
+class WompiWebhookController extends Controller
+{
+    /**
+     * Handle an incoming Wompi webhook.
+     *
+     * The signature is verified by the "wompi.webhook" middleware. This
+     * method validates the payload, normalizes it and dispatches the
+     * WompiWebhookReceived and WompiPaymentProcessed events.
+     *
+     * Listen to those events to run your own business logic:
+     *
+     *     Event::listen(WompiPaymentProcessed::class, function ($event) {
+     *         if (! $event->isSuccessful) {
+     *             return;
+     *         }
+ *
+     *         $order = Order::where('reference', $event->webhook->reference())->first();
+     *         $order?->update(['status' => 'paid']);
+     *     });
+     */
+    public function __invoke(Request $request): JsonResponse
+    {
+        Wompi::handleWebhook($request);
+
+        return response()->json(['status' => 'ok'], 200);
+    }
+}
