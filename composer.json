@@ -9,7 +9,8 @@
     }
   ],
   "require": {
-    "php": "^8.2",
+    "php": "^8.2.35 || ^8.3.36 || ^8.4.27 || ^8.5.12",
+    "illuminate/cache": "^10.0|^11.0|^12.0|^13.0",
     "illuminate/contracts": "^10.0|^11.0|^12.0|^13.0",
     "illuminate/http": "^10.0|^11.0|^12.0|^13.0",
     "illuminate/support": "^10.0|^11.0|^12.0|^13.0"
@@ -34,7 +35,7 @@
       }
     }
   },
-  "minimum-stability": "dev",
+  "minimum-stability": "stable",
   "prefer-stable": true,
   "require-dev": {
     "pestphp/pest": "^3.0",
