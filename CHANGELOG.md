@@ -1,3 +1,40 @@
+## 2.0.0 (2026-11-18)
+
+* build: upgrade semantic-release to v25 and the release workflow to Node 22 ([b27e984](https://github.com/rmirandasv/laravel-wompi/commit/b27e984))
+* docs: rewrite the documentation for v2 ([7bb4c4b](https://github.com/rmirandasv/laravel-wompi/commit/7bb4c4b))
+* ci: test the patched PHP versions and refresh the Wompi spec ([ec07ff1](https://github.com/rmirandasv/laravel-wompi/commit/ec07ff1))
+* test: cover the endpoint contract and the v2 behaviour ([c1a78c0](https://github.com/rmirandasv/laravel-wompi/commit/c1a78c0))
+* fix(config): point the API and auth URLs at the real Wompi endpoints ([cc9a94d](https://github.com/rmirandasv/laravel-wompi/commit/cc9a94d))
+* fix(security): require a patched PHP version to prevent PHP2Shell ([782661d](https://github.com/rmirandasv/laravel-wompi/commit/782661d))
+* feat(api): use the real Wompi endpoints for payments, transactions and subscriptions ([50a2b82](https://github.com/rmirandasv/laravel-wompi/commit/50a2b82))
+* feat(dtos): add typed request and response DTOs for the core commerce API ([bced32b](https://github.com/rmirandasv/laravel-wompi/commit/bced32b))
+* feat(http): add the transport layer, the OAuth2 authenticator and the card masker ([a914224](https://github.com/rmirandasv/laravel-wompi/commit/a914224))
+* feat(webhook): normalize the payload, respect EsProductiva and dispatch once ([4d1c394](https://github.com/rmirandasv/laravel-wompi/commit/4d1c394))
+* feat(webhook): publish the webhook route and the controller ([7d8072c](https://github.com/rmirandasv/laravel-wompi/commit/7d8072c))
+
+
+### BREAKING CHANGE
+
+* createRecurringCharge(), executeTestTransaction() and
+getTokenizedCard() were removed, and getAplicativoData() now returns an
+AplicativoResponseDTO instead of an array. Use createRecurringPaymentLink() or
+createTokenizedTransaction() for subscriptions, listTokenizedCards() to read
+the tokenized cards, and the Wompi panel development mode to run test
+transactions.
+* isSuccessfulPayment() now returns false for a test
+transaction, validateWebhookRequest() returns a WompiWebhook instead of the
+raw array, and the events carry the normalized webhook as an extra argument.
+* the card fields are renamed to mesVencimiento and
+anioVencimiento, the 3DS payload nests the card under tarjetaCreditoDebido and
+now requires the customer information, and the response DTOs expose the real
+Wompi fields instead of the previously documented ones.
+* the package now requires PHP 8.2.35, 8.3.36, 8.4.27 or
+8.5.12. Update PHP before upgrading, and check that your distribution or LTS
+vendor ships the backported fix.
+* WOMPI_API_URL must no longer contain the /v1 suffix and
+WOMPI_AUTH_URL must point to https://id.wompi.sv/connect/token. The
+WOMPI_WEBHOOK_SECRET variable was removed; use WOMPI_CLIENT_SECRET instead.
+
 ## 1.1.0 (2026-04-21)
 
 * Merge pull request #8 from rmirandasv/feat/laravel13-support ([53c511c](https://github.com/rmirandasv/laravel-wompi/commit/53c511c)), closes [#8](https://github.com/rmirandasv/laravel-wompi/issues/8)
