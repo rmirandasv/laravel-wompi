@@ -2,216 +2,173 @@
 
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
-use Rmirandasv\Wompi\WompiClient;
+use Rmirandasv\Wompi\Facades\Wompi;
 
-describe('Complete Payment Flow', function () {
-
+describe('Complete payment flow', function () {
     beforeEach(function () {
         Cache::flush();
     });
 
-    it('can complete full payment link creation flow', function () {
-        // Mock all HTTP requests for the complete flow
+    it('creates a payment link through the facade', function () {
         Http::fake([
-            'https://id.wompi.sv/test' => Http::response([
+            'https://id.wompi.sv/connect/token' => Http::response([
                 'access_token' => 'flow_token_123',
                 'expires_in' => 3600,
                 'token_type' => 'Bearer',
             ], 200),
-            'https://api.wompi.sv/v1/test/EnlacePago' => Http::response([
-                'id' => 'payment_link_abc',
-                'url' => 'https://wompi.sv/pay/payment_link_abc',
-                'monto' => 150.00,
-                'descripcion' => 'Test Product Purchase',
-                'estado' => 'Activo',
-            ], 201),
+            'https://api.wompi.sv/EnlacePago' => Http::response([
+                'idEnlace' => 1384854,
+                'urlEnlace' => 'https://wompi.sv/pay/1384854',
+                'urlEnlaceLargo' => 'https://wompi.sv/l/1384854',
+                'urlQrCodeEnlace' => 'https://wompi.sv/qr/1384854',
+                'estaProductivo' => true,
+            ], 200),
         ]);
 
-        // Get the WompiClient instance from the container
-        $wompiClient = app(WompiClient::class);
-
-        // Create a payment link
-        $paymentLink = $wompiClient->createPaymentLink([
+        $paymentLink = Wompi::createPaymentLink([
             'monto' => 150.00,
-            'descripcion' => 'Test Product Purchase',
-            'urlRedirect' => 'https://mystore.com/payment/success',
-            'urlWebhook' => 'https://mystore.com/webhooks/wompi',
+            'identificadorEnlaceComercio' => 'ORDER-150',
+            'nombreProducto' => 'Test Product Purchase',
+            'configuracion' => [
+                'urlRedirect' => 'https://mystore.com/payment/success',
+                'urlWebhook' => 'https://mystore.com/webhooks/wompi',
+            ],
         ]);
 
-        // Assertions
-        expect($paymentLink)
-            ->toHaveKey('id')
-            ->toHaveKey('url')
-            ->and($paymentLink['monto'])->toEqual(150.00)
-            ->and($paymentLink['estado'])->toBe('Activo');
+        expect($paymentLink->idEnlace)->toBe(1384854)
+            ->and($paymentLink->urlEnlace)->toBe('https://wompi.sv/pay/1384854')
+            ->and($paymentLink->estaProductivo)->toBeTrue();
 
-        // Verify the correct HTTP requests were made
         Http::assertSent(function ($request) {
-            return $request->url() === 'https://id.wompi.sv/test' &&
-                   $request['grant_type'] === 'client_credentials';
+            return $request->url() === 'https://id.wompi.sv/connect/token'
+                && $request['grant_type'] === 'client_credentials';
         });
 
         Http::assertSent(function ($request) {
-            return str_contains($request->url(), '/EnlacePago') &&
-                   $request->hasHeader('Authorization', 'Bearer flow_token_123') &&
-                   $request['monto'] === 150.00 &&
-                   $request['descripcion'] === 'Test Product Purchase';
+            return str_contains($request->url(), '/EnlacePago')
+                && $request->hasHeader('Authorization', 'Bearer flow_token_123')
+                && $request['monto'] === 150.00
+                && $request['identificadorEnlaceComercio'] === 'ORDER-150'
+                && $request['nombreProducto'] === 'Test Product Purchase';
         });
     });
 
-    it('can complete tokenization and recurring charge flow', function () {
+    it('tokenizes a card and charges it without 3ds', function () {
         Http::fake([
-            'https://id.wompi.sv/test' => Http::response([
+            'https://id.wompi.sv/connect/token' => Http::response([
                 'access_token' => 'token_flow_456',
                 'expires_in' => 3600,
             ], 200),
-            'https://api.wompi.sv/v1/test/Tokenizacion' => Http::response([
-                'tokenId' => 'tok_subscription_123',
-                'ultimos4Digitos' => '4242',
-                'tipoTarjeta' => 'VISA',
-                'mesExpiracion' => '12',
-                'anioExpiracion' => '25',
-            ], 201),
-            'https://api.wompi.sv/v1/test/CargoRecurrente' => Http::response([
+            'https://api.wompi.sv/Tokenizacion' => Http::response([
+                'token' => 'tok_subscription_123',
+                'tarjetaEnmascarada' => '424242******4242',
+            ], 200),
+            'https://api.wompi.sv/TransaccionCompra/TokenizadaSin3Ds' => Http::response([
                 'idTransaccion' => 'recurring_txn_789',
-                'estado' => 'Aprobada',
+                'esAprobada' => true,
+                'esReal' => true,
                 'monto' => 29.99,
                 'codigoAutorizacion' => 'AUTH_REC_123',
-            ], 201),
+            ], 200),
         ]);
 
-        $wompiClient = app(WompiClient::class);
-
-        // Step 1: Tokenize the card
-        $tokenData = $wompiClient->tokenizeCard([
+        $token = Wompi::tokenizeCard([
             'numeroTarjeta' => '4242424242424242',
             'cvv' => '123',
-            'mesExpiracion' => '12',
-            'anioExpiracion' => '25',
-            'nombreTitular' => 'Juan Perez',
+            'mesVencimiento' => 12,
+            'anioVencimiento' => 2030,
+            'nombreEnTarjeta' => 'Juan Perez',
         ]);
 
-        expect($tokenData)
-            ->toHaveKey('tokenId')
-            ->and($tokenData['tokenId'])->toBe('tok_subscription_123')
-            ->and($tokenData['tipoTarjeta'])->toBe('VISA');
+        expect($token->token)->toBe('tok_subscription_123')
+            ->and($token->tarjetaEnmascarada)->toBe('424242******4242');
 
-        // Step 2: Create a recurring charge with the token
-        $chargeResult = $wompiClient->createRecurringCharge([
-            'tokenId' => $tokenData['tokenId'],
+        $charge = Wompi::createTokenizedTransaction([
+            'tokenTarjeta' => $token->token,
             'monto' => 29.99,
-            'descripcion' => 'Monthly Subscription - January',
+            'nombreCliente' => 'Juan Perez',
+            'emailCliente' => 'juan@example.com',
         ]);
 
-        expect($chargeResult)
-            ->toHaveKey('idTransaccion')
-            ->and($chargeResult['estado'])->toBe('Aprobada')
-            ->and($chargeResult['monto'])->toBe(29.99);
+        expect($charge->idTransaccion)->toBe('recurring_txn_789')
+            ->and($charge->esAprobada)->toBeTrue()
+            ->and($charge->monto)->toEqual(29.99);
 
-        // Verify the flow - auth is cached, so we have: 1 auth + 1 tokenize + 1 charge
+        // The token is cached, so there is one auth request plus two calls.
         Http::assertSentCount(3);
     });
 
-    it('handles complete webhook processing flow', function () {
-        $wompiClient = app(WompiClient::class);
+    it('handles a complete webhook processing flow', function () {
+        $payload = wompi_webhook_payload();
+        $body = json_encode($payload);
+        $hash = hash_hmac('sha256', $body, 'test_client_secret');
 
-        // Simulate webhook data from Wompi
-        $webhookPayload = [
-            'idTransaccion' => 'txn_webhook_123',
-            'monto' => 250.00,
-            'resultadoTransaccion' => 'ExitosaAprobada',
-            'codigoAutorizacion' => 'WEBHOOK_AUTH_456',
-            'formaPago' => 'VISA',
-            'mensaje' => 'Transaccion exitosa',
-        ];
-
-        $webhookBody = json_encode($webhookPayload);
-        $wompiHash = hash_hmac('sha256', $webhookBody, 'test_client_secret');
-
-        // Create a simulated webhook request
         $request = \Illuminate\Http\Request::create(
             '/api/webhooks/wompi',
             'POST',
             [],
             [],
             [],
-            ['HTTP_WOMPI_HASH' => $wompiHash],
-            $webhookBody
+            ['HTTP_WOMPI_HASH' => $hash],
+            $body
         );
 
-        // Validate and parse the webhook
-        $parsedData = $wompiClient->validateWebhookRequest($request);
+        $webhook = Wompi::handleWebhook($request);
 
-        // Check if it's a successful payment
-        $isSuccessful = $wompiClient->isSuccessfulPayment($parsedData);
-
-        expect($parsedData)
-            ->toBeArray()
-            ->toHaveKey('idTransaccion')
-            ->and($parsedData['idTransaccion'])->toBe('txn_webhook_123')
-            ->and($isSuccessful)->toBeTrue();
+        expect($webhook->idTransaccion())->toBe('2bedafea-0924-49f0-927d-8c638e193990')
+            ->and($webhook->reference())->toBe('OC1234')
+            ->and(Wompi::isSuccessfulPayment($payload))->toBeTrue();
     });
 
-    it('handles redirect URL validation flow', function () {
-        $wompiClient = app(WompiClient::class);
-
-        // Simulate redirect URL parameters from Wompi
+    it('handles a redirect url validation flow', function () {
         $redirectParams = [
             'idTransaccion' => 'txn_redirect_999',
             'monto' => '500.00',
-            'esReal' => '1',
+            'esReal' => 'True',
             'formaPago' => 'MASTERCARD',
-            'esAprobada' => '1',
+            'esAprobada' => 'True',
             'codigoAutorizacion' => 'REDIRECT_AUTH_789',
             'mensaje' => 'Pago exitoso',
         ];
 
-        // Calculate the hash as Wompi would send it
         $concatenated = implode('', array_values($redirectParams));
-        $wompiHash = hash_hmac('sha256', $concatenated, 'test_client_secret');
+        $hash = hash_hmac('sha256', $concatenated, 'test_client_secret');
 
-        // Validate the redirect parameters
-        $isValid = $wompiClient->validateRedirectParams($redirectParams, $wompiHash);
-
-        expect($isValid)->toBeTrue()
-            ->and($redirectParams['esAprobada'])->toBe('1')
-            ->and($redirectParams['idTransaccion'])->toBe('txn_redirect_999');
+        expect(Wompi::validateRedirectParams($redirectParams, $hash))->toBeTrue()
+            ->and(Wompi::isRedirectApproved($redirectParams))->toBeTrue();
     });
 
-    it('can retrieve and manage tokenized cards', function () {
+    it('lists and deletes tokenized cards', function () {
         Http::fake([
-            'https://id.wompi.sv/test' => Http::response([
+            'https://id.wompi.sv/connect/token' => Http::response([
                 'access_token' => 'card_mgmt_token',
                 'expires_in' => 3600,
             ], 200),
-            'https://api.wompi.sv/v1/test/Tokenizacion' => Http::response([
-                'tokenId' => 'tok_mgmt_123',
-                'ultimos4Digitos' => '5555',
-                'tipoTarjeta' => 'MASTERCARD',
-            ], 201),
-            'https://api.wompi.sv/v1/test/Tokenizacion/tok_mgmt_123' => Http::sequence()
-                ->push(['tokenId' => 'tok_mgmt_123', 'ultimos4Digitos' => '5555'], 200)
-                ->push(['success' => true, 'message' => 'Token eliminado'], 200),
+            'https://api.wompi.sv/Tokenizacion*' => Http::response([
+                'paginaActual' => 1,
+                'cantidadPorPagina' => 50,
+                'totalDeElementos' => 1,
+                'totalPaginas' => 1,
+                'resultado' => [
+                    [
+                        'tokenId' => 'tok_mgmt_123',
+                        'maskedCreditCardNumber' => '555555******4444',
+                    ],
+                ],
+            ], 200),
+            'https://api.wompi.sv/Tokenizacion/tok_mgmt_123' => Http::response([], 204),
         ]);
 
-        $wompiClient = app(WompiClient::class);
+        $cards = Wompi::listTokenizedCards();
 
-        // Create token
-        $token = $wompiClient->tokenizeCard([
-            'numeroTarjeta' => '5555555555554444',
-            'mesExpiracion' => '06',
-            'anioExpiracion' => '26',
-        ]);
+        expect($cards->total())->toBe(1)
+            ->and($cards->items()[0]['tokenId'])->toBe('tok_mgmt_123');
 
-        expect($token['tokenId'])->toBe('tok_mgmt_123');
+        Wompi::deleteTokenizedCard('tok_mgmt_123');
 
-        // Retrieve token
-        $retrieved = $wompiClient->getTokenizedCard('tok_mgmt_123');
-        expect($retrieved['tokenId'])->toBe('tok_mgmt_123');
-
-        // Delete token
-        $deleted = $wompiClient->deleteTokenizedCard('tok_mgmt_123');
-        expect($deleted['success'])->toBeTrue();
+        Http::assertSent(function ($request) {
+            return $request->method() === 'DELETE'
+                && str_contains($request->url(), '/Tokenizacion/tok_mgmt_123');
+        });
     });
 });
-

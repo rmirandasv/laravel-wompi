@@ -1,101 +1,70 @@
 <?php
 
 use Illuminate\Http\Request;
-use Rmirandasv\Wompi\Exceptions\ConfigurationException;
+use Illuminate\Support\Facades\Event;
+use Rmirandasv\Wompi\Events\WompiPaymentProcessed;
+use Rmirandasv\Wompi\Events\WompiWebhookReceived;
 use Rmirandasv\Wompi\Exceptions\PaymentGatewayException;
 use Rmirandasv\Wompi\WompiClient;
 
-describe('WompiClient Webhook Validation', function () {
-
-    it('validates webhook signature correctly', function () {
+describe('WompiClient webhook handling', function () {
+    it('validates a webhook signature', function () {
         $client = app(WompiClient::class);
-        
-        $webhookBody = json_encode([
-            'idTransaccion' => 'txn_123',
-            'monto' => 100.00,
-            'resultadoTransaccion' => 'ExitosaAprobada',
-        ]);
 
-        // Calculate expected hash using the test secret
-        $expectedHash = hash_hmac('sha256', $webhookBody, 'test_client_secret');
+        $body = json_encode(wompi_webhook_payload());
+        $hash = hash_hmac('sha256', $body, 'test_client_secret');
 
-        $isValid = $client->validateWebhookSignature($webhookBody, $expectedHash);
-
-        expect($isValid)->toBeTrue();
+        expect($client->validateWebhookSignature($body, $hash))->toBeTrue()
+            ->and($client->validateWebhookSignature($body, 'wrong_hash'))->toBeFalse();
     });
 
-    it('rejects invalid webhook signature', function () {
+    it('rejects an empty signature without a deprecation', function () {
         $client = app(WompiClient::class);
-        
-        $webhookBody = json_encode([
-            'idTransaccion' => 'txn_123',
-            'monto' => 100.00,
-        ]);
 
-        $invalidHash = 'invalid_hash_12345';
-
-        $isValid = $client->validateWebhookSignature($webhookBody, $invalidHash);
-
-        expect($isValid)->toBeFalse();
+        expect($client->validateWebhookSignature('{}', ''))->toBeFalse();
     });
 
-    it('validates and parses complete webhook request', function () {
-        $webhookData = [
-            'idTransaccion' => 'txn_456',
-            'monto' => 250.50,
-            'resultadoTransaccion' => 'ExitosaAprobada',
-            'codigoAutorizacion' => 'AUTH123',
-        ];
+    it('parses a webhook request', function () {
+        $payload = wompi_webhook_payload();
+        $body = json_encode($payload);
+        $hash = hash_hmac('sha256', $body, 'test_client_secret');
 
-        $webhookBody = json_encode($webhookData);
-        $wompiHash = hash_hmac('sha256', $webhookBody, 'test_client_secret');
-
-        // Create a mock request
         $request = Request::create('/webhook', 'POST', [], [], [], [
-            'HTTP_WOMPI_HASH' => $wompiHash,
-        ], $webhookBody);
+            'HTTP_WOMPI_HASH' => $hash,
+        ], $body);
 
-        $client = app(WompiClient::class);
-        $parsedData = $client->validateWebhookRequest($request);
+        $webhook = app(WompiClient::class)->handleWebhook($request);
 
-        expect($parsedData)
-            ->toBeArray()
-            ->toHaveKey('idTransaccion')
-            ->and($parsedData['idTransaccion'])->toBe('txn_456')
-            ->and($parsedData['monto'])->toBe(250.50);
+        expect($webhook)->toBeInstanceOf(\Rmirandasv\Wompi\Webhooks\WompiWebhook::class)
+            ->and($webhook->idTransaccion())->toBe('2bedafea-0924-49f0-927d-8c638e193990')
+            ->and($webhook->reference())->toBe('OC1234')
+            ->and($webhook->productName())->toBe('Camisa Azula')
+            ->and($webhook->raw())->toBe($payload);
     });
 
-    it('throws exception when webhook hash header is missing', function () {
-        $request = Request::create('/webhook', 'POST', [], [], [], [], json_encode([
-            'idTransaccion' => 'txn_789',
-        ]));
+    it('throws when the signature header is missing', function () {
+        $request = Request::create('/webhook', 'POST', [], [], [], [], json_encode(wompi_webhook_payload()));
 
-        $client = app(WompiClient::class);
-        $client->validateWebhookRequest($request);
+        app(WompiClient::class)->handleWebhook($request);
     })->throws(PaymentGatewayException::class, 'wompi_hash header is required');
 
-    it('throws exception when webhook body is empty', function () {
+    it('throws when the body is empty', function () {
         $request = Request::create('/webhook', 'POST', [], [], [], [
             'HTTP_WOMPI_HASH' => 'some_hash',
         ], '');
 
-        $client = app(WompiClient::class);
-        $client->validateWebhookRequest($request);
+        app(WompiClient::class)->handleWebhook($request);
     })->throws(PaymentGatewayException::class, 'body is required');
 
-    it('throws exception when webhook signature is invalid', function () {
-        $webhookBody = json_encode(['idTransaccion' => 'txn_999']);
-        $invalidHash = 'completely_wrong_hash';
-
+    it('throws when the signature is invalid', function () {
         $request = Request::create('/webhook', 'POST', [], [], [], [
-            'HTTP_WOMPI_HASH' => $invalidHash,
-        ], $webhookBody);
+            'HTTP_WOMPI_HASH' => 'completely_wrong_hash',
+        ], json_encode(wompi_webhook_payload()));
 
-        $client = app(WompiClient::class);
-        $client->validateWebhookRequest($request);
+        app(WompiClient::class)->handleWebhook($request);
     })->throws(PaymentGatewayException::class, 'signature is invalid');
 
-    it('throws exception when webhook JSON is invalid', function () {
+    it('throws when the json is invalid', function () {
         $invalidJson = '{invalid json}';
         $hash = hash_hmac('sha256', $invalidJson, 'test_client_secret');
 
@@ -103,30 +72,106 @@ describe('WompiClient Webhook Validation', function () {
             'HTTP_WOMPI_HASH' => $hash,
         ], $invalidJson);
 
-        $client = app(WompiClient::class);
-        $client->validateWebhookRequest($request);
+        app(WompiClient::class)->handleWebhook($request);
     })->throws(PaymentGatewayException::class, 'json is invalid');
 
-    it('identifies successful payment from webhook data', function () {
-        $client = app(WompiClient::class);
+    describe('payment status detection', function () {
+        it('detects a successful payment on the PascalCase payload Wompi sends', function () {
+            $client = app(WompiClient::class);
 
-        $successfulWebhook = [
-            'idTransaccion' => 'txn_success',
-            'resultadoTransaccion' => 'ExitosaAprobada',
-        ];
+            expect($client->isSuccessfulPayment(wompi_webhook_payload()))->toBeTrue();
+        });
 
-        expect($client->isSuccessfulPayment($successfulWebhook))->toBeTrue();
+        it('detects a rejected payment', function () {
+            $client = app(WompiClient::class);
+
+            expect($client->isSuccessfulPayment(wompi_webhook_payload([
+                'ResultadoTransaccion' => 'Rechazada',
+            ])))->toBeFalse();
+        });
+
+        it('detects a successful payment on the camelCase payload of the API', function () {
+            $client = app(WompiClient::class);
+
+            expect($client->isSuccessfulPayment([
+                'idTransaccion' => 'txn_123',
+                'monto' => 100.00,
+                'resultadoTransaccion' => 1,
+                'esAprobada' => true,
+                'esReal' => true,
+            ]))->toBeTrue();
+        });
+
+        it('never marks a test transaction as successful', function () {
+            $client = app(WompiClient::class);
+
+            $payload = wompi_webhook_payload(['EsProductiva' => false]);
+
+            expect($client->isSuccessfulPayment($payload))->toBeFalse();
+
+            $webhook = \Rmirandasv\Wompi\Support\PayloadNormalizer::normalize($payload);
+
+            expect($webhook->isApproved())->toBeTrue()
+                ->and($webhook->isTestTransaction())->toBeTrue()
+                ->and($webhook->isSuccessful())->toBeFalse();
+        });
     });
 
-    it('identifies failed payment from webhook data', function () {
-        $client = app(WompiClient::class);
+    describe('event dispatching', function () {
+        it('dispatches both events exactly once', function () {
+            Event::fake();
 
-        $failedWebhook = [
-            'idTransaccion' => 'txn_failed',
-            'resultadoTransaccion' => 'Rechazada',
-        ];
+            $payload = wompi_webhook_payload();
+            $body = json_encode($payload);
+            $hash = hash_hmac('sha256', $body, 'test_client_secret');
 
-        expect($client->isSuccessfulPayment($failedWebhook))->toBeFalse();
+            $request = Request::create('/webhook', 'POST', [], [], [], [
+                'HTTP_WOMPI_HASH' => $hash,
+            ], $body);
+
+            app(WompiClient::class)->handleWebhook($request);
+
+            Event::assertDispatchedTimes(WompiWebhookReceived::class, 1);
+            Event::assertDispatchedTimes(WompiPaymentProcessed::class, 1);
+        });
+
+        it('does not dispatch the events twice for the same request', function () {
+            Event::fake();
+
+            $payload = wompi_webhook_payload();
+            $body = json_encode($payload);
+            $hash = hash_hmac('sha256', $body, 'test_client_secret');
+
+            $request = Request::create('/webhook', 'POST', [], [], [], [
+                'HTTP_WOMPI_HASH' => $hash,
+            ], $body);
+
+            $client = app(WompiClient::class);
+
+            $client->handleWebhook($request);
+            $client->handleWebhook($request);
+
+            Event::assertDispatchedTimes(WompiWebhookReceived::class, 1);
+            Event::assertDispatchedTimes(WompiPaymentProcessed::class, 1);
+        });
+
+        it('reports a test transaction as unsuccessful', function () {
+            Event::fake();
+
+            $payload = wompi_webhook_payload(['EsProductiva' => false]);
+            $body = json_encode($payload);
+            $hash = hash_hmac('sha256', $body, 'test_client_secret');
+
+            $request = Request::create('/webhook', 'POST', [], [], [], [
+                'HTTP_WOMPI_HASH' => $hash,
+            ], $body);
+
+            app(WompiClient::class)->handleWebhook($request);
+
+            Event::assertDispatched(WompiPaymentProcessed::class, function ($event) {
+                return $event->isSuccessful === false
+                    && $event->webhook->isTestTransaction() === true;
+            });
+        });
     });
 });
-

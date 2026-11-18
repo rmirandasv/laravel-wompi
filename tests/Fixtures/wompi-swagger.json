@@ -1,0 +1,707 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "Wompi API",
+    "version": "v1"
+  },
+  "x-source": "https://api.wompi.sv/swagger/v1/swagger.json",
+  "x-fetched-at": "2026-11-17",
+  "paths": {
+    "/Aplicativo": {
+      "get": {
+        "summary": "Consulta los datos del aplicativo con el cual esta actualmente autenticado, incluyendo\r\nla información de el listado de cuotas validas y si aplica el pago con puntos",
+        "parameters": []
+      }
+    },
+    "/Aplicativo/{idAplicativo}": {
+      "get": {
+        "summary": "Permite obtener un Aplicativo por su Id.",
+        "parameters": [
+          {
+            "name": "idAplicativo",
+            "in": "path",
+            "required": true
+          }
+        ]
+      }
+    },
+    "/Cuenta": {
+      "get": {
+        "summary": " Consulta los datos de la cuenta con el cual esta actualmente autenticado, incluyendo\r\nla información de el listado de aplicativos",
+        "parameters": []
+      },
+      "delete": {
+        "summary": "Elimino la cuenta del usuario logueado actualmente",
+        "parameters": []
+      }
+    },
+    "/Cuenta/{idAplicativo}/TapOnPhone": {
+      "post": {
+        "summary": "Metodo para registrar un aplicativo para usarse como POS en un dispositivo movil Android",
+        "parameters": [
+          {
+            "name": "idAplicativo",
+            "in": "path",
+            "required": true
+          }
+        ]
+      },
+      "delete": {
+        "summary": "Metodo para dejar de usar un aplicativo como POS en un dispositivo movil Android",
+        "parameters": [
+          {
+            "name": "idAplicativo",
+            "in": "path",
+            "required": true
+          }
+        ]
+      }
+    },
+    "/Cuenta/{idAplicativo}/activar-mpos": {
+      "post": {
+        "summary": "Metodo para activar el aplicativo para que pueda transaccionar con mpos",
+        "parameters": [
+          {
+            "name": "idAplicativo",
+            "in": "path",
+            "required": true
+          }
+        ]
+      }
+    },
+    "/Cuenta/{id}/Direccion": {
+      "put": {
+        "summary": "Metodo para actualizar la direccion de la cuenta",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ]
+      }
+    },
+    "/EnlacePago": {
+      "post": {
+        "summary": "Permite crear un nuevo enlace de pago para que el usuario haga el proceso de\r\ningreso de datos de pago en una interfaz de Wompi",
+        "parameters": []
+      },
+      "get": {
+        "summary": "Obtiene el listado paginado de los enlaces de pago",
+        "parameters": [
+          {
+            "name": "FechaInicioVigencia",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "FechaFinVigencia",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "Nombre",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "IdAplicativo",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "Activo",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "CantidadPorPagina",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "PaginaActual",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "Ids",
+            "in": "query",
+            "required": null
+          }
+        ]
+      }
+    },
+    "/EnlacePago/{id}": {
+      "get": {
+        "summary": "Consulta los datos de un enlace de pago creado previamente, incluyendo\r\nla información de la transacción de pago en caso ya se haya ejecutado una.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ]
+      },
+      "put": {
+        "summary": "Permite editar un enlace de pago para que el usuario haga el proceso de\r\ningreso de datos de pago en una interfaz de Wompi",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ]
+      }
+    },
+    "/EnlacePago/{id}/desactivar": {
+      "put": {
+        "summary": "Desactiva un enlace de pago invalidandole realizar pagos nuevamente",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ]
+      }
+    },
+    "/EnlacePago/{id}/imagen": {
+      "delete": {
+        "summary": "Elimina la imagen de un botón de pago, dada su url",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "url",
+            "in": "query",
+            "required": true
+          }
+        ]
+      },
+      "post": {
+        "summary": "Agregar una imagen de un botón de pago",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "esPrincipal",
+            "in": "query",
+            "required": null
+          }
+        ]
+      }
+    },
+    "/EnlacePago/{id}/activar": {
+      "put": {
+        "summary": "Reactiva un enlace de pago permitiendole realizar pagos nuevamente",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ]
+      }
+    },
+    "/EnlacePagoRecurrente/{id}": {
+      "get": {
+        "summary": "Obtiene los datos generales del un enlace de pago recurrente por su ID",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ]
+      },
+      "post": {
+        "summary": "Desactiva un enlace de pago recurrente por su ID (lo marca como inactivo)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ]
+      },
+      "put": {
+        "summary": "Edita los datos de un enlace de pago recurrente",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ]
+      }
+    },
+    "/EnlacePagoRecurrente": {
+      "get": {
+        "summary": "Obtiene la lista de enlaces de pago recurrentes",
+        "parameters": [
+          {
+            "name": "Nombre",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "FechaCreacionDesde",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "FechaCreacionHasta",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "IdAplicativo",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "EsActivo",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "CantidadPorPagina",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "PaginaActual",
+            "in": "query",
+            "required": null
+          }
+        ]
+      },
+      "post": {
+        "summary": "Crea un enlace de pago recurrente",
+        "parameters": []
+      }
+    },
+    "/EnlacePagoRecurrente/{id}/imagen": {
+      "delete": {
+        "summary": "Elimina la imagen asociadas al enlace de pago recurrente por su ID",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ]
+      },
+      "post": {
+        "summary": "Agregar una imagen al enlace de pago recurrente",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ]
+      }
+    },
+    "/EnlacePagoRecurrente/{id}/suscripciones": {
+      "get": {
+        "summary": "Obtiene las suscripciones asociadas a un enlace de pago recurrente por su ID",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "FechaRecurrenciaDesde",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "FechaRecurrenciaHasta",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "FechaCreacionDesde",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "FechaCreacionHasta",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "MontoDesde",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "MontoHasta",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "IdSuscriptor",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "PaginaActual",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "SuscripcionesPorPagina",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "Estado",
+            "in": "query",
+            "required": null
+          }
+        ]
+      }
+    },
+    "/Mpos/Solicitar": {
+      "post": {
+        "summary": "Permite crear una solicitud de compra de MPos",
+        "parameters": []
+      }
+    },
+    "/Mpos": {
+      "get": {
+        "summary": "Obtiene un listado de los Mpos registrados",
+        "parameters": []
+      }
+    },
+    "/Mpos/Registrar": {
+      "post": {
+        "summary": "Permite registrar un MPos sin necesidad de una solicitud de compra",
+        "parameters": []
+      }
+    },
+    "/Mpos/{id}/Activar": {
+      "post": {
+        "summary": "Permite activar un MPos",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ]
+      }
+    },
+    "/Mpos/{id}/Desactivar": {
+      "post": {
+        "summary": "Permite desactivar un Mpos",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ]
+      }
+    },
+    "/api/Regiones": {
+      "get": {
+        "summary": "Obtener un listado de regiones segun  ISO 3166-1 alpha-2 y  territorios segun ISO 3166-2",
+        "parameters": []
+      }
+    },
+    "/Tokenizacion": {
+      "post": {
+        "summary": "Permite tokenizar una tarjeta enviandole los datos de la tarjeta",
+        "parameters": []
+      },
+      "get": {
+        "summary": "Permite obtener las tarjetas tokenizadas de una cuenta.",
+        "parameters": [
+          {
+            "name": "Pagina",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "CantidadPagina",
+            "in": "query",
+            "required": null
+          }
+        ]
+      }
+    },
+    "/Tokenizacion/{tokenId}": {
+      "delete": {
+        "summary": "Permite eliminar una tarjeta tokenizada de una cuenta.",
+        "parameters": [
+          {
+            "name": "tokenId",
+            "in": "path",
+            "required": true
+          }
+        ]
+      }
+    },
+    "/TransaccionCompra/PagoQr": {
+      "post": {
+        "summary": "Permite crear una transacción de compra con QR Wompi.",
+        "parameters": []
+      }
+    },
+    "/TransaccionCompra/PagoQr/{id}": {
+      "put": {
+        "summary": "Permite finalizar una transacción de pago QR Wompi.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ]
+      }
+    },
+    "/TransaccionCompra": {
+      "post": {
+        "summary": "Debido a que este end point no esta protegido con 3D Secure \r\nsolo está disponible bajo solicitud especial por medio de nuestro canal de soporte",
+        "parameters": []
+      },
+      "get": {
+        "summary": "Consulta un listado paginado de transacciones",
+        "parameters": [
+          {
+            "name": "CantidadPorPagina",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "PaginaActual",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "FechaInicio",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "FechaFin",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "NumeroCuenta",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "FormaPago",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "ResultadoTransaccion",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "EmailCliente",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "IdAplicativo",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "MontoInicial",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "MontoFinal",
+            "in": "query",
+            "required": null
+          }
+        ]
+      }
+    },
+    "/TransaccionCompra/Bitcoin": {
+      "post": {
+        "summary": "Permite generar los datos para hacer un cobro con Bitcoin",
+        "parameters": []
+      }
+    },
+    "/TransaccionCompra/Quick-pay": {
+      "post": {
+        "summary": "Permite generar los datos para hacer un cobro con quick pay",
+        "parameters": []
+      }
+    },
+    "/TransaccionCompra/TokenizadaSin3Ds": {
+      "post": {
+        "summary": "Permite realizar transacciones tokenizadas sin 3D Secure",
+        "parameters": [
+          {
+            "name": "idAplicativo",
+            "in": "query",
+            "required": null
+          }
+        ]
+      }
+    },
+    "/TransaccionCompra/3Ds": {
+      "post": {
+        "summary": "/// Permite generar los datos de transaccion 3ds para poder hacer un cobro con 3ds",
+        "parameters": []
+      }
+    },
+    "/TransaccionCompra/Nequi": {
+      "post": {
+        "summary": "Permite generar una transacción de pago a través de Nequi.",
+        "parameters": []
+      }
+    },
+    "/TransaccionCompra/{id}": {
+      "get": {
+        "summary": "Consulta una transacción creada previamente incluyendo e resultado de la misma",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ]
+      }
+    },
+    "/TransaccionCompra/estadistica/diaria": {
+      "get": {
+        "summary": "Obtiene un resumen de las transacciones diarias",
+        "parameters": [
+          {
+            "name": "FechaInicio",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "FechaFin",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "NumeroCuenta",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "FormaPago",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "ResultadoTransaccion",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "EmailCliente",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "IdAplicativo",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "MontoInicial",
+            "in": "query",
+            "required": null
+          },
+          {
+            "name": "MontoFinal",
+            "in": "query",
+            "required": null
+          }
+        ]
+      }
+    },
+    "/TransaccionCompra/{idTransaccion}/comprobante": {
+      "get": {
+        "summary": "Obtiene el comprobante de pago de la transacción",
+        "parameters": [
+          {
+            "name": "idTransaccion",
+            "in": "path",
+            "required": true
+          }
+        ]
+      }
+    },
+    "/TransaccionCompra/Mpos": {
+      "post": {
+        "summary": "Permite generar una transaccion de mpos con los datos enviados",
+        "parameters": []
+      }
+    },
+    "/TransaccionCompra/Mpos/Banda": {
+      "post": {
+        "summary": "Permite generar una transaccion de mpos tipo banda con los datos enviados",
+        "parameters": []
+      }
+    },
+    "/TransaccionCompra/Mpos/{idTransaccion}/firma": {
+      "post": {
+        "summary": "Permite agregar una firma a una transaccion de compra Mpos",
+        "parameters": [
+          {
+            "name": "idTransaccion",
+            "in": "path",
+            "required": true
+          }
+        ]
+      }
+    },
+    "/TransaccionCompra/Mpos/{idTransaccion}/enviar-comprobante": {
+      "post": {
+        "summary": null,
+        "parameters": [
+          {
+            "name": "idTransaccion",
+            "in": "path",
+            "required": true
+          }
+        ]
+      }
+    },
+    "/TransaccionCompra/visa-direct": {
+      "post": {
+        "summary": "Permite iniciar una transaccion con VISA Direct (requiere permisos adicionales para utilizarse).",
+        "parameters": []
+      }
+    },
+    "/TransaccionCompra/visa-direct/{idTransaccion}/anular": {
+      "put": {
+        "summary": "Permite anular una transaccion de extraccion de fondos con VISA Direct.",
+        "parameters": [
+          {
+            "name": "idTransaccion",
+            "in": "path",
+            "required": true
+          }
+        ]
+      }
+    }
+  }
+}
