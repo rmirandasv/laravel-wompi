@@ -1,0 +1,51 @@
+name: Refresh Wompi spec
+
+on:
+  schedule:
+    # Every Monday at 06:00 UTC.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    name: Check the Wompi OpenAPI specification
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download the current specification
+        run: |
+          curl -fsSL --max-time 60 https://api.wompi.sv/swagger/v1/swagger.json -o /tmp/swagger.json
+          jq '{
+            openapi: .openapi,
+            info: {"title": .info.title, "version": .info.version},
+            "x-source": "https://api.wompi.sv/swagger/v1/swagger.json",
+            "x-fetched-at": "'$(date -u +%Y-%m-%d)'",
+            paths: (.paths | with_entries(.value |= with_entries(.value |= {
+              summary: (.summary // null),
+              parameters: ((.parameters // []) | map({name, in, required}))
+            })))
+          }' /tmp/swagger.json > /tmp/wompi-swagger.json
+
+      - name: Compare with the committed fixture
+        run: |
+          if ! diff -u tests/Fixtures/wompi-swagger.json /tmp/wompi-swagger.json; then
+            echo ""
+            echo "::error::The Wompi API specification changed."
+            echo "The endpoints of the package may have been renamed or removed."
+            echo "Update tests/Fixtures/wompi-swagger.json and the affected methods."
+            exit 1
+          fi
+          echo "The Wompi API specification is unchanged."
+
+      - name: Upload the refreshed specification
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wompi-swagger
+          path: /tmp/wompi-swagger.json

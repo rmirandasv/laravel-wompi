@@ -12,30 +12,55 @@ jobs:
   test:
     name: Test PHP ${{ matrix.php }}
     runs-on: ubuntu-latest
-    
+
     strategy:
       fail-fast: false
       matrix:
-        php: ['8.2', '8.3', '8.4', '8.5']
-    
+        # The minimum supported (patched) version of every branch. The package
+        # requires PHP 8.2.35 or newer because of PHP2Shell
+        # (CVE-2026-109618 / CVE-2026-109619).
+        php: ['8.2.35', '8.3.36', '8.4.27', '8.5.12']
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
           extensions: mbstring, xml, ctype, json, bcmath
           coverage: xdebug
-      
+
       - name: Install Composer dependencies
         run: composer update --prefer-dist --no-interaction --no-progress --prefer-stable
-      
+
+      - name: Validate the composer manifest
+        run: composer validate --strict
+
       - name: Run tests
         run: composer test
-      
+
       - name: Run tests with coverage
-        if: matrix.php == '8.4'
+        if: matrix.php == '8.5.12'
         run: composer test:coverage
 
+  audit:
+    name: Audit dependencies
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5.12'
+          extensions: mbstring, xml, ctype, json, bcmath
+
+      - name: Install Composer dependencies
+        run: composer update --prefer-dist --no-interaction --no-progress --prefer-stable
+
+      - name: Check for known security advisories
+        run: composer audit --no-interaction

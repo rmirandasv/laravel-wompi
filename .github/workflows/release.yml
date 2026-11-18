@@ -12,7 +12,8 @@ jobs:
     
     strategy:
       matrix:
-        php: ['8.2', '8.3']
+        # The minimum supported (patched) version of every branch.
+        php: ['8.2.35', '8.5.12']
     
     steps:
       - name: Checkout code
@@ -26,8 +27,8 @@ jobs:
           coverage: xdebug
       
       - name: Install Composer dependencies
-        run: composer install --prefer-dist --no-interaction --no-progress
-      
+        run: composer update --prefer-dist --no-interaction --no-progress --prefer-stable
+
       - name: Run tests
         run: composer test
 
