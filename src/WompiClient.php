@@ -2,338 +2,388 @@
 
 namespace Rmirandasv\Wompi;
 
-use Illuminate\Http\Client\RequestException;
+use Illuminate\Http\Client\Response;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
 use Rmirandasv\Wompi\Contracts\WompiClientInterface;
 use Rmirandasv\Wompi\DTOs\Requests\PaymentLinkRequestDTO;
+use Rmirandasv\Wompi\DTOs\Requests\RecurringPaymentLinkRequestDTO;
 use Rmirandasv\Wompi\DTOs\Requests\TokenizeCardRequestDTO;
+use Rmirandasv\Wompi\DTOs\Requests\TokenizedTransactionRequestDTO;
 use Rmirandasv\Wompi\DTOs\Requests\Transaction3DSRequestDTO;
+use Rmirandasv\Wompi\DTOs\Responses\AplicativoResponseDTO;
+use Rmirandasv\Wompi\DTOs\Responses\DailyTransactionStatsDTO;
+use Rmirandasv\Wompi\DTOs\Responses\PagedResultDTO;
 use Rmirandasv\Wompi\DTOs\Responses\PaymentLinkResponseDTO;
+use Rmirandasv\Wompi\DTOs\Responses\RecurringPaymentLinkResponseDTO;
 use Rmirandasv\Wompi\DTOs\Responses\TokenizedCardResponseDTO;
+use Rmirandasv\Wompi\DTOs\Responses\TransactionDetailDTO;
 use Rmirandasv\Wompi\DTOs\Responses\TransactionResponseDTO;
-use Rmirandasv\Wompi\Events\WompiPaymentProcessed;
-use Rmirandasv\Wompi\Events\WompiWebhookReceived;
 use Rmirandasv\Wompi\Exceptions\ConfigurationException;
-use Rmirandasv\Wompi\Exceptions\PaymentGatewayException;
+use Rmirandasv\Wompi\Http\WompiAuthenticator;
+use Rmirandasv\Wompi\Http\WompiTransport;
+use Rmirandasv\Wompi\Support\PayloadNormalizer;
+use Rmirandasv\Wompi\Webhooks\WompiWebhook;
+use Rmirandasv\Wompi\Webhooks\WompiWebhookHandler;
 
+/**
+ * The Wompi API client.
+ *
+ * Every path used here is documented in the Wompi Swagger:
+ * https://api.wompi.sv/index.html
+ */
 class WompiClient implements WompiClientInterface
 {
+    private readonly WompiAuthenticator $authenticator;
+
+    private readonly WompiTransport $transport;
+
+    private readonly WompiWebhookHandler $webhookHandler;
+
     public function __construct(
-        private ?string $authUrl,
-        private ?string $apiUrl,
-        private ?string $clientId,
-        private ?string $clientSecret,
+        private readonly string $apiUrl,
+        private readonly string $authUrl,
+        private readonly string $audience,
+        private readonly ?string $clientId,
+        private readonly ?string $clientSecret,
+        private readonly int $timeout = 30,
+        private readonly int $connectTimeout = 10,
+        private readonly int $retry = 2,
+        private readonly bool $logPayloads = false,
+        private readonly ?string $cacheStore = null,
+        private readonly int $ttlMargin = 60,
     ) {
-        if (! $this->authUrl || ! $this->clientId || ! $this->clientSecret || ! $this->apiUrl) {
+        if (! $this->clientId || ! $this->clientSecret) {
             throw new ConfigurationException('Wompi credentials are not set');
         }
+
+        $this->authenticator = new WompiAuthenticator(
+            authUrl: $this->authUrl,
+            audience: $this->audience,
+            clientId: $this->clientId,
+            clientSecret: $this->clientSecret,
+            ttlMargin: $this->ttlMargin,
+            cacheStore: $this->cacheStore,
+            timeout: $this->timeout,
+            connectTimeout: $this->connectTimeout,
+        );
+
+        $this->transport = new WompiTransport(
+            apiUrl: $this->apiUrl,
+            authenticator: $this->authenticator,
+            timeout: $this->timeout,
+            connectTimeout: $this->connectTimeout,
+            retry: $this->retry,
+            logPayloads: $this->logPayloads,
+        );
+
+        $this->webhookHandler = new WompiWebhookHandler($this->clientSecret);
     }
 
     /**
-     * Get OAuth2 access token (cached for ~59 minutes)
+     * Build the client from the application configuration.
      */
-    private function getAccessToken(): string
+    public static function fromConfig(): self
     {
-        $accessToken = Cache::get('wompi_access_token');
-
-        if (! $accessToken) {
-            [$accessToken, $expiresIn] = $this->getAccessTokenFromWompi();
-            Cache::put('wompi_access_token', $accessToken, $expiresIn);
-        }
-
-        return $accessToken;
+        return new self(
+            apiUrl: (string) config('wompi.api_url'),
+            authUrl: (string) config('wompi.auth_url'),
+            audience: (string) config('wompi.audience', 'wompi_api'),
+            clientId: config('wompi.client_id'),
+            clientSecret: config('wompi.client_secret'),
+            timeout: (int) config('wompi.timeout', 30),
+            connectTimeout: (int) config('wompi.connect_timeout', 10),
+            retry: (int) config('wompi.retry', 2),
+            logPayloads: (bool) config('wompi.log_payloads', false),
+            cacheStore: config('wompi.token_cache.store'),
+            ttlMargin: (int) config('wompi.token_cache.ttl_margin', 60),
+        );
     }
 
-    /**
-     * Fetch a fresh access token from Wompi
-     */
-    private function getAccessTokenFromWompi(): array
-    {
-        try {
-            $response = Http::asForm()->post($this->authUrl, [
-                'grant_type' => 'client_credentials',
-                'client_id' => $this->clientId,
-                'client_secret' => $this->clientSecret,
-                'audience' => 'wompi_api',
-            ])->throw();
+    // -----------------------------------------------------------------
+    // Payment links
+    // -----------------------------------------------------------------
 
-            $data = $response->json();
-
-            $accessToken = $data['access_token'];
-            $expiresIn = $data['expires_in'];
-
-            return [$accessToken, $expiresIn];
-        } catch (RequestException $e) {
-            Log::error('Error getting Wompi access token', [
-                'error' => $e->getMessage(),
-            ]);
-            throw new PaymentGatewayException('Failed to authenticate with Wompi', 0, $e);
-        }
-    }
-
-    /**
-     * Make authenticated API request
-     */
-    private function makeAuthenticatedRequest(string $method, string $endpoint, array $data = []): array
-    {
-        try {
-            $accessToken = $this->getAccessToken();
-            $url = sprintf('%s/%s', rtrim($this->apiUrl, '/'), ltrim($endpoint, '/'));
-            
-            $startTime = microtime(true);
-            Log::info("Wompi API Request: {$method} {$endpoint}", [
-                'url' => $url,
-                // Mask sensitive card numbers if present before logging
-                'payload' => $this->maskSensitiveData($data),
-            ]);
-
-            $response = Http::withToken($accessToken)
-                ->$method($url, $data)
-                ->throw();
-
-            $duration = round((microtime(true) - $startTime) * 1000, 2);
-            Log::info("Wompi API Response: {$method} {$endpoint}", [
-                'status' => $response->status(),
-                'duration_ms' => $duration,
-            ]);
-
-            return $response->json() ?? [];
-        } catch (RequestException $e) {
-            $response = $e->response;
-            $statusCode = $response->status();
-            $errorBody = $response->json();
-            
-            Log::error("Wompi API request failed: {$method} {$endpoint}", [
-                'status' => $statusCode,
-                'error_body' => $errorBody,
-                'payload' => $this->maskSensitiveData($data),
-                'headers' => $response->headers(),
-            ]);
-            
-            $message = "API request failed: {$endpoint}. ";
-            if (isset($errorBody['mensaje'])) {
-                $message .= "Reason: " . $errorBody['mensaje'];
-            } elseif (isset($errorBody['message'])) {
-                $message .= "Reason: " . $errorBody['message'];
-            }
-
-            throw new PaymentGatewayException($message, 0, $e, $errorBody, $statusCode);
-        }
-    }
-
-    /**
-     * Masks sensitive data like credit card numbers for logging purposes.
-     */
-    private function maskSensitiveData(array $data): array
-    {
-        $masked = $data;
-        if (isset($masked['numeroTarjeta'])) {
-            $masked['numeroTarjeta'] = substr($masked['numeroTarjeta'], 0, 4) . '********' . substr($masked['numeroTarjeta'], -4);
-        }
-        if (isset($masked['cvv'])) {
-            $masked['cvv'] = '***';
-        }
-        return $masked;
-    }
-
-    /**
-     * Create a payment link (Enlace de Pago)
-     * 
-     * @see https://docs.wompi.sv/metodos-api/enlace-de-pago
-     */
-    public function createPaymentLink(array|PaymentLinkRequestDTO $data): PaymentLinkResponseDTO|array
+    public function createPaymentLink(array|PaymentLinkRequestDTO $data): PaymentLinkResponseDTO
     {
         $payload = $data instanceof PaymentLinkRequestDTO ? $data->toArray() : $data;
-        $response = $this->makeAuthenticatedRequest('post', 'EnlacePago', $payload);
-        
+
+        return new PaymentLinkResponseDTO($this->transport->post('EnlacePago', $payload));
+    }
+
+    public function listPaymentLinks(array $filters = []): PagedResultDTO
+    {
+        return new PagedResultDTO($this->transport->get('EnlacePago', $filters));
+    }
+
+    public function getPaymentLink(int|string $id): PaymentLinkResponseDTO
+    {
+        return new PaymentLinkResponseDTO($this->transport->get("EnlacePago/{$id}"));
+    }
+
+    public function updatePaymentLink(int|string $id, array|PaymentLinkRequestDTO $data): PaymentLinkResponseDTO
+    {
+        $payload = $data instanceof PaymentLinkRequestDTO ? $data->toArray() : $data;
+
+        return new PaymentLinkResponseDTO($this->transport->put("EnlacePago/{$id}", $payload));
+    }
+
+    public function activatePaymentLink(int|string $id): PaymentLinkResponseDTO
+    {
+        return new PaymentLinkResponseDTO($this->transport->put("EnlacePago/{$id}/activar"));
+    }
+
+    public function deactivatePaymentLink(int|string $id): PaymentLinkResponseDTO
+    {
+        return new PaymentLinkResponseDTO($this->transport->put("EnlacePago/{$id}/desactivar"));
+    }
+
+    public function addPaymentLinkImage(int|string $id, string $path, bool $isPrincipal = false): PaymentLinkResponseDTO
+    {
+        $response = $this->transport->postMultipart(
+            "EnlacePago/{$id}/imagen",
+            [],
+            ['imagen' => $path],
+            ['esPrincipal' => $isPrincipal ? 'true' : 'false']
+        );
+
         return new PaymentLinkResponseDTO($response);
     }
 
-    /**
-     * Create a 3DS purchase transaction (Transacción Compra con 3DS)
-     * 
-     * @see https://docs.wompi.sv/metodos-api/crear-transaccion-compra-3ds
-     */
-    public function createTransaction3DS(array|Transaction3DSRequestDTO $data): TransactionResponseDTO|array
+    public function deletePaymentLinkImage(int|string $id, string $url): void
+    {
+        $this->transport->delete("EnlacePago/{$id}/imagen", [], ['url' => $url]);
+    }
+
+    // -----------------------------------------------------------------
+    // Transactions
+    // -----------------------------------------------------------------
+
+    public function createTransaction3DS(array|Transaction3DSRequestDTO $data): TransactionResponseDTO
     {
         $payload = $data instanceof Transaction3DSRequestDTO ? $data->toArray() : $data;
-        $response = $this->makeAuthenticatedRequest('post', 'Transaccion', $payload);
-        
-        return new TransactionResponseDTO($response);
+
+        return new TransactionResponseDTO($this->transport->post('TransaccionCompra/3Ds', $payload));
     }
 
-    /**
-     * Get aplicativo data (configuration and capabilities)
-     * 
-     * @see https://docs.wompi.sv/metodos-api/datos-aplicativo
-     */
-    public function getAplicativoData(): array
+    public function createTokenizedTransaction(array|TokenizedTransactionRequestDTO $data): TransactionResponseDTO
     {
-        return $this->makeAuthenticatedRequest('get', 'Aplicativo');
+        $payload = $data instanceof TokenizedTransactionRequestDTO ? $data->toArray() : $data;
+
+        return new TransactionResponseDTO($this->transport->post('TransaccionCompra/TokenizadaSin3Ds', $payload));
     }
 
-    /**
-     * Tokenize a card for future use
-     * 
-     * @see https://docs.wompi.sv/metodos-api/tokenizacion
-     */
-    public function tokenizeCard(array|TokenizeCardRequestDTO $data): TokenizedCardResponseDTO|array
+    public function getTransaction(string $id): TransactionDetailDTO
+    {
+        return new TransactionDetailDTO($this->transport->get("TransaccionCompra/{$id}"));
+    }
+
+    public function listTransactions(array $filters = []): PagedResultDTO
+    {
+        return new PagedResultDTO($this->transport->get('TransaccionCompra', $filters));
+    }
+
+    public function getTransactionReceipt(string $id): string
+    {
+        return $this->transport->getRaw("TransaccionCompra/{$id}/comprobante");
+    }
+
+    public function getTransactionReceiptResponse(string $id): Response
+    {
+        return $this->transport->getResponse("TransaccionCompra/{$id}/comprobante");
+    }
+
+    public function getDailyTransactionStats(array $filters = []): DailyTransactionStatsDTO
+    {
+        return new DailyTransactionStatsDTO($this->transport->get('TransaccionCompra/estadistica/diaria', $filters));
+    }
+
+    // -----------------------------------------------------------------
+    // Tokenization
+    // -----------------------------------------------------------------
+
+    public function tokenizeCard(array|TokenizeCardRequestDTO $data): TokenizedCardResponseDTO
     {
         $payload = $data instanceof TokenizeCardRequestDTO ? $data->toArray() : $data;
-        $response = $this->makeAuthenticatedRequest('post', 'Tokenizacion', $payload);
-        
-        return new TokenizedCardResponseDTO($response);
+
+        return new TokenizedCardResponseDTO($this->transport->post('Tokenizacion', $payload));
     }
 
-    /**
-     * Get a tokenized card by ID
-     */
-    public function getTokenizedCard(string $tokenId): array
+    public function listTokenizedCards(int $page = 1, int $perPage = 50): PagedResultDTO
     {
-        return $this->makeAuthenticatedRequest('get', "Tokenizacion/{$tokenId}");
+        return new PagedResultDTO($this->transport->get('Tokenizacion', [
+            'Pagina' => $page,
+            'CantidadPagina' => $perPage,
+        ]));
     }
 
-    /**
-     * Delete a tokenized card
-     */
-    public function deleteTokenizedCard(string $tokenId): array
+    public function deleteTokenizedCard(string $tokenId): void
     {
-        return $this->makeAuthenticatedRequest('delete', "Tokenizacion/{$tokenId}");
+        $this->transport->delete("Tokenizacion/{$tokenId}");
     }
 
-    /**
-     * Create a recurring charge using a tokenized card
-     * 
-     * @see https://docs.wompi.sv/metodos-api/cargos-recurrentes
-     */
-    public function createRecurringCharge(array $data): array
+    // -----------------------------------------------------------------
+    // Subscriptions
+    // -----------------------------------------------------------------
+
+    public function createRecurringPaymentLink(array|RecurringPaymentLinkRequestDTO $data): RecurringPaymentLinkResponseDTO
     {
-        return $this->makeAuthenticatedRequest('post', 'CargoRecurrente', $data);
+        $payload = $data instanceof RecurringPaymentLinkRequestDTO ? $data->toArray() : $data;
+
+        return new RecurringPaymentLinkResponseDTO($this->transport->post('EnlacePagoRecurrente', $payload));
     }
 
-    /**
-     * Execute test transactions (for development/testing)
-     */
-    public function executeTestTransaction(array $data): array
+    public function listRecurringPaymentLinks(array $filters = []): PagedResultDTO
     {
-        return $this->makeAuthenticatedRequest('post', 'TransaccionPrueba', $data);
+        return new PagedResultDTO($this->transport->get('EnlacePagoRecurrente', $filters));
     }
 
-    /**
-     * Validate webhook HMAC signature
-     * 
-     * @see https://docs.wompi.sv/webhook/validar-webhook
-     */
+    public function getRecurringPaymentLink(string $id): RecurringPaymentLinkResponseDTO
+    {
+        return new RecurringPaymentLinkResponseDTO($this->transport->get("EnlacePagoRecurrente/{$id}"));
+    }
+
+    public function updateRecurringPaymentLink(string $id, array $data): RecurringPaymentLinkResponseDTO
+    {
+        return new RecurringPaymentLinkResponseDTO($this->transport->put("EnlacePagoRecurrente/{$id}", $data));
+    }
+
+    public function deactivateRecurringPaymentLink(string $id): RecurringPaymentLinkResponseDTO
+    {
+        return new RecurringPaymentLinkResponseDTO($this->transport->post("EnlacePagoRecurrente/{$id}"));
+    }
+
+    public function listRecurringSubscriptions(string $id, array $filters = []): PagedResultDTO
+    {
+        return new PagedResultDTO($this->transport->get("EnlacePagoRecurrente/{$id}/suscripciones", $filters));
+    }
+
+    // -----------------------------------------------------------------
+    // Business
+    // -----------------------------------------------------------------
+
+    public function getAplicativoData(): AplicativoResponseDTO
+    {
+        return new AplicativoResponseDTO($this->transport->get('Aplicativo'));
+    }
+
+    public function getAplicativoById(string $id): AplicativoResponseDTO
+    {
+        return new AplicativoResponseDTO($this->transport->get("Aplicativo/{$id}"));
+    }
+
+    public function getAccount(): array
+    {
+        return $this->transport->get('Cuenta');
+    }
+
+    public function getRegions(): array
+    {
+        return $this->transport->get('api/Regiones');
+    }
+
+    // -----------------------------------------------------------------
+    // Webhooks and redirect URLs
+    // -----------------------------------------------------------------
+
     public function validateWebhookSignature(string $body, string $receivedHash): bool
     {
-        if (! $this->clientSecret) {
-            throw new ConfigurationException('Wompi webhook secret is not set');
-        }
-
-        $calculatedHash = hash_hmac('sha256', $body, $this->clientSecret);
-
-        return hash_equals($calculatedHash, $receivedHash);
+        return $this->webhookHandler->validateSignature($body, $receivedHash);
     }
 
-    /**
-     * Validate and parse webhook request
-     * Returns the parsed webhook data as an array
-     */
-    public function validateWebhookRequest(Request $request): array
+    public function handleWebhook(Request $request): WompiWebhook
     {
-        $wompiHash = $request->header('wompi_hash');
-
-        if (! $wompiHash) {
-            throw new PaymentGatewayException('Webhook request invalid: wompi_hash header is required');
-        }
-
-        $body = $request->getContent();
-
-        if (empty($body)) {
-            throw new PaymentGatewayException('Webhook request invalid: body is required');
-        }
-
-        if (! $this->validateWebhookSignature($body, $wompiHash)) {
-            throw new PaymentGatewayException('Webhook request invalid: signature is invalid');
-        }
-
-        $webhookData = json_decode($body, true);
-
-        if (json_last_error() !== JSON_ERROR_NONE) {
-            throw new PaymentGatewayException('Webhook request invalid: json is invalid');
-        }
-
-        // Dispatch general webhook received event
-        event(new WompiWebhookReceived($webhookData));
-        
-        // Dispatch specific payment processed event with success boolean
-        $isSuccessful = $this->isSuccessfulPayment($webhookData);
-        event(new WompiPaymentProcessed($webhookData, $isSuccessful));
-
-        return $webhookData;
+        return $this->webhookHandler->handle($request);
     }
 
-    /**
-     * Validate redirect URL parameters
-     * 
-     * @see https://docs.wompi.sv/redirect-url/validar-parametros-url-redirect
-     */
+    public function validateWebhookRequest(Request $request): WompiWebhook
+    {
+        return $this->webhookHandler->handle($request);
+    }
+
     public function validateRedirectParams(array $params, string $receivedHash): bool
     {
-        if (! $this->clientSecret) {
+        if ($this->clientSecret === '') {
             throw new ConfigurationException('Wompi client secret is not set');
         }
-        $payload = $this->redirectParamsConcatenated($params);
-        $calculatedHash = hash_hmac('sha256', $payload, $this->clientSecret);
-        return hash_equals($calculatedHash, $receivedHash);
-    }
 
-    private function redirectParamsConcatenated(array $params): string
-    {
-        if ($this->isPaymentLinkRedirect($params)) {
-            return $this->stringParam($params, ['identificadorEnlaceComercio', 'IdentificadorEnlaceComercio'])
-                .$this->stringParam($params, ['idTransaccion', 'IdTransaccion'])
-                .$this->stringParam($params, ['idEnlace', 'IdEnlace'])
-                .$this->stringParam($params, ['monto', 'Monto']);
+        if ($receivedHash === '') {
+            return false;
         }
-        return $this->stringParam($params, ['idTransaccion', 'IdTransaccion'])
-            .$this->stringParam($params, ['monto', 'Monto'])
-            .$this->stringParam($params, ['esReal', 'EsReal'])
-            .$this->stringParam($params, ['formaPago', 'FormaPago'])
-            .$this->stringParam($params, ['esAprobada', 'EsAprobada'])
-            .$this->stringParam($params, ['codigoAutorizacion', 'CodigoAutorizacion'])
-            .$this->stringParam($params, ['mensaje', 'Mensaje']);
-    }
 
-    private function isPaymentLinkRedirect(array $params): bool
-    {
-        $ref = $this->stringParam($params, ['identificadorEnlaceComercio', 'IdentificadorEnlaceComercio']);
-        return $ref !== '';
-    }
+        $values = $this->redirectParamValues($params);
 
-    /**
-     * @param  list<string>  $keys
-     */
-    private function stringParam(array $params, array $keys): string
-    {
-        foreach ($keys as $key) {
-            $value = $params[$key] ?? null;
-            if ($value !== null && $value !== '' && is_scalar($value)) {
-                return (string) $value;
-            }
+        // A missing parameter means the redirect was tampered with or comes
+        // from another source, so it is rejected instead of being validated
+        // against a shorter string.
+        if ($values === null) {
+            return false;
         }
-        return '';
+
+        $calculated = hash_hmac('sha256', implode('', $values), $this->clientSecret);
+
+        return hash_equals($calculated, $receivedHash);
     }
 
-    /**
-     * Check if a webhook indicates a successful payment
-     */
     public function isSuccessfulPayment(array $webhookData): bool
     {
-        return isset($webhookData['resultadoTransaccion']) && 
-               $webhookData['resultadoTransaccion'] === 'ExitosaAprobada';
+        return PayloadNormalizer::normalize($webhookData)->isSuccessful();
+    }
+
+    public function isRedirectApproved(array $params): bool
+    {
+        $approved = PayloadNormalizer::pickBool($params, 'esAprobada', 'EsAprobada');
+
+        return $approved === true;
+    }
+
+    /**
+     * The parameters of the redirect URL, in the order Wompi concatenates
+     * them before signing.
+     *
+     * @param  array<string, mixed>  $params
+     * @return array<int, string>|null
+     */
+    private function redirectParamValues(array $params): ?array
+    {
+        $keys = $this->isPaymentLinkRedirect($params)
+            ? ['identificadorEnlaceComercio', 'idTransaccion', 'idEnlace', 'monto']
+            : ['idTransaccion', 'monto', 'esReal', 'formaPago', 'esAprobada', 'codigoAutorizacion', 'mensaje'];
+
+        $values = [];
+
+        foreach ($keys as $key) {
+            $value = PayloadNormalizer::pick($params, $key);
+
+            if ($value === null) {
+                return null;
+            }
+
+            if (is_bool($value)) {
+                $values[] = $value ? 'true' : 'false';
+
+                continue;
+            }
+
+            if (is_array($value) || is_object($value)) {
+                return null;
+            }
+
+            $values[] = (string) $value;
+        }
+
+        return $values;
+    }
+
+    /**
+     * A payment link redirect carries the merchant reference, the API one does
+     * not.
+     *
+     * @param  array<string, mixed>  $params
+     */
+    private function isPaymentLinkRedirect(array $params): bool
+    {
+        $reference = PayloadNormalizer::pick($params, 'identificadorEnlaceComercio', 'IdentificadorEnlaceComercio');
+
+        return $reference !== null && $reference !== '';
     }
 }
